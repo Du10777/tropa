@@ -99,7 +99,8 @@ class MainActivity : HelperBaseComponentActivity() {
 
     @Composable
     override fun ScreenContent() {
-        BackHandler { moveTaskToBack(false) }
+        // FORK: opened on top of the Tropa screen (advanced mode), Back returns to it.
+        BackHandler { if (isTaskRoot) moveTaskToBack(false) else finish() }
         MainScreen(
             mainViewModel = mainViewModel,
             onAction = { action ->
