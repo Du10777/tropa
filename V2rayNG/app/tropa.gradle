@@ -4,7 +4,7 @@
 // `apply(from = "tropa.gradle")` hook at the end of build.gradle.kts. Because it is applied last,
 // this script runs after the upstream configuration and may override it.
 
-def tropaVersionName = '0.1.0'
+def tropaVersionName = '0.2.0'
 def upstreamVersionName = android.defaultConfig.versionName
 
 def versionParts = tropaVersionName.tokenize('.').collect { it as int }
@@ -20,11 +20,19 @@ android {
         buildConfigField 'String', 'UPSTREAM_VERSION_NAME', "\"${upstreamVersionName}\""
     }
 
-    // Build type source sets outrank main and the flavors, so these resources replace the
-    // upstream ones (app name, tile and notification channel labels).
     sourceSets {
+        // Tropa code and its own (tropa_-prefixed) resources live next to upstream's main set.
+        main.java.srcDirs += 'src/tropa/java'
+        main.res.srcDirs += 'src/tropa/res'
+        test.java.srcDirs += 'src/tropa/test/java'
+
+        // Build type source sets outrank main and the flavors, so these resources replace the
+        // upstream ones (app name, launcher and notification icons) and this manifest overlay can
+        // move the launcher entry from the upstream MainActivity to the Tropa screen.
         debug.res.srcDirs += 'src/tropa/res-override'
         release.res.srcDirs += 'src/tropa/res-override'
+        debug.manifest.srcFile 'src/tropa/AndroidManifest.xml'
+        release.manifest.srcFile 'src/tropa/AndroidManifest.xml'
     }
 
     // Registered after the upstream callback, so the Tropa names and version code win.
@@ -35,6 +43,23 @@ android {
             output.versionCodeOverride = tropaVersionCode
         }
     }
+}
+
+// JVM screenshot tests of the Tropa screens (Robolectric + Roborazzi); nothing of this ships.
+android.testOptions.unitTests.includeAndroidResources = true
+android.testOptions.unitTests.all { it.systemProperty 'roborazzi.test.record', 'true' }
+def composeBom = project.extensions.getByType(VersionCatalogsExtension).named('libs')
+        .findVersion('composeBom').get().requiredVersion
+dependencies {
+    testImplementation 'org.robolectric:robolectric:4.17'
+    testImplementation 'io.github.takahirom.roborazzi:roborazzi:1.76.0'
+    testImplementation 'io.github.takahirom.roborazzi:roborazzi-compose:1.76.0'
+    testImplementation platform("androidx.compose:compose-bom:${composeBom}")
+    testImplementation 'androidx.compose.ui:ui-test-junit4'
+    testImplementation 'junit:junit:4.13.2'
+    testRuntimeOnly 'org.junit.vintage:junit-vintage-engine'
+    debugImplementation platform("androidx.compose:compose-bom:${composeBom}")
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
 }
 
 // Tropa ships the playstore flavor only (no applicationId suffix), so the fdroid variants are skipped.

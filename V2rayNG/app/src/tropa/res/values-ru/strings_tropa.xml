@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Главный экран -->
+    <string name="tropa_add_connection_title">Добавить подключение</string>
+    <string name="tropa_add_connection_hint">Его присылает тот, кто настроил вам доступ: ссылкой, QR-кодом или файлом.</string>
+    <string name="tropa_add_copied_link">Добавить скопированную ссылку</string>
+    <string name="tropa_add_copied_link_hint">ссылка уже в буфере обмена</string>
+    <string name="tropa_scan_qr">Сканировать QR-код</string>
+    <string name="tropa_scan_qr_hint">камерой или с картинки в галерее</string>
+    <string name="tropa_add_file">Добавить файл</string>
+    <string name="tropa_add_file_hint">.json, .txt или .conf</string>
+    <string name="tropa_cancel">Отмена</string>
+    <string name="tropa_clipboard_banner">В буфере обмена есть ссылка для подключения.</string>
+    <string name="tropa_dismiss">Скрыть</string>
+    <string name="tropa_nav_connections">Подключения</string>
+    <string name="tropa_nav_settings">Настройки</string>
+    <string name="tropa_nav_add">Добавить подключение</string>
+
+    <!-- Статус -->
+    <string name="tropa_status_disconnected">Отключено</string>
+    <string name="tropa_status_disconnected_hint">Включите переключатель, чтобы подключиться</string>
+    <string name="tropa_status_connecting">Подключение…</string>
+    <string name="tropa_status_connecting_hint">Запускаем туннель</string>
+    <string name="tropa_status_connected">Подключено</string>
+    <string name="tropa_status_connected_hint">Туннель работает</string>
+    <string name="tropa_status_error">Не удалось подключиться</string>
+
+    <!-- Карточка подключения -->
+    <string name="tropa_connection_default_name">Подключение</string>
+    <string name="tropa_card_expires">действует до %1$s</string>
+    <string name="tropa_card_used">использовано %1$s</string>
+    <string name="tropa_card_of_total">из %1$s</string>
+    <string name="tropa_card_unlimited">трафик без ограничений</string>
+    <plurals name="tropa_card_servers">
+        <item quantity="one">%d сервер</item>
+        <item quantity="few">%d сервера</item>
+        <item quantity="many">%d серверов</item>
+        <item quantity="other">%d сервера</item>
+    </plurals>
+    <string name="tropa_stat_online">В сети</string>
+
+    <!-- Импорт -->
+    <string name="tropa_import_busy">Добавляю подключение…</string>
+    <string name="tropa_import_added">Подключение добавлено</string>
+    <string name="tropa_import_exists">Это подключение уже добавлено</string>
+    <string name="tropa_import_not_found">Не нашёл ссылку на подключение</string>
+    <string name="tropa_import_network_error">Не удалось загрузить подключение: %1$s</string>
+    <string name="tropa_import_unrecognized">Загруженные данные не похожи на подключение</string>
+    <string name="tropa_import_file_error">Не удалось прочитать файл</string>
+    <string name="tropa_no_connection">Сначала добавьте подключение</string>
+
+    <!-- Экран подключений -->
+    <string name="tropa_connections_title">Подключения</string>
+    <string name="tropa_connections_empty">Подключений пока нет</string>
+    <string name="tropa_connection_refresh">Обновить</string>
+    <string name="tropa_connection_delete">Удалить</string>
+    <string name="tropa_connection_delete_confirm">Удалить «%1$s»?</string>
+    <string name="tropa_connection_delete_active_note">Оно сейчас используется — VPN отключится.</string>
+    <string name="tropa_connection_updated">Обновлено</string>
+    <string name="tropa_connection_update_failed">Не удалось обновить</string>
+    <string name="tropa_connection_manual">добавлено ссылкой или файлом</string>
+    <string name="tropa_connection_updated_at">обновлено %1$s</string>
+    <string name="tropa_yes">Да</string>
+    <string name="tropa_no">Нет</string>
+    <string name="tropa_back">Назад</string>
+
+    <!-- Настройки -->
+    <string name="tropa_settings_title">Настройки</string>
+    <string name="tropa_settings_language">Язык</string>
+    <string name="tropa_language_system">Как в системе</string>
+    <string name="tropa_settings_permissions">Разрешения</string>
+    <string name="tropa_settings_per_app">Приложения без VPN</string>
+    <string name="tropa_settings_advanced">Расширенный режим</string>
+    <string name="tropa_settings_advanced_hint">Тропа открывается в полном интерфейсе v2rayNG. «Назад» возвращает на простой экран.</string>
+    <string name="tropa_settings_about">О программе</string>
+    <string name="tropa_about_version">Версия %1$s, на базе v2rayNG %2$s</string>
+    <string name="tropa_about_source">Исходный код и лицензия (GPL-3.0)</string>
+
+    <!-- Разрешения -->
+    <string name="tropa_permissions_title">Разрешения</string>
+    <string name="tropa_permission_granted">разрешено</string>
+    <string name="tropa_permission_denied">не разрешено</string>
+    <string name="tropa_permission_question">Разрешить?</string>
+    <string name="tropa_perm_vpn">VPN</string>
+    <string name="tropa_perm_vpn_reason">Android просит подтвердить, что Тропе можно создать VPN. Без этого подключиться нельзя.</string>
+    <string name="tropa_perm_notifications">Уведомления</string>
+    <string name="tropa_perm_notifications_reason">Чтобы показывать, что VPN включён, и сообщать, когда связь пропала.</string>
+    <string name="tropa_perm_battery">Работа в фоне без ограничений</string>
+    <string name="tropa_perm_battery_reason">Некоторые телефоны ради экономии батареи останавливают фоновые приложения, и VPN отключается. Это разрешение не даст Тропе засыпать.</string>
+    <string name="tropa_perm_camera">Камера</string>
+    <string name="tropa_perm_camera_reason">Чтобы сканировать QR-код подключения.</string>
+    <string name="tropa_perm_phone">Состояние телефона (тип сети)</string>
+    <string name="tropa_perm_phone_reason">Чтобы отличать 4G от 3G и приостанавливать проверки связи в слабой сети. Android называет это разрешение «совершать звонки и управлять ими», но Тропа никуда не звонит и звонки не читает.</string>
+</resources>
