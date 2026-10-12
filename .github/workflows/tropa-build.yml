@@ -1,0 +1,182 @@
+name: Tropa build
+
+on:
+  push:
+    branches:
+      - tropa
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a GitHub release with this tag (for example v0.1.0); leave empty to only build'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tropa-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: '30.0.16248370'
+  # Tropa Go additions (tropa_*.go) live on this branch of our AndroidLibXrayLite fork and are
+  # overlaid onto the library commit pinned by the upstream submodule.
+  LIB_REPO: 'Du10777/AndroidLibXrayLite'
+  LIB_BRANCH: 'tropa'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          submodules: 'recursive'
+          fetch-depth: '0'
+
+      - name: Setup Java
+        uses: actions/setup-java@v6.0.1
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          log-accepted-android-sdk-licenses: false
+          cmdline-tools-version: '14742923'
+          packages: 'platforms;android-37.0 build-tools;37.0.0 platform-tools'
+
+      - name: Install NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --channel=0 --install "ndk;${NDK_VERSION}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> $GITHUB_ENV
+
+      - name: Restore cached libhevtun
+        id: hev-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/libs
+          key: libhevtun-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+      - name: Build libhevtun
+        if: steps.hev-cache.outputs.cache-hit != 'true'
+        run: bash compile-hevtun.sh
+
+      - name: Save libhevtun
+        if: steps.hev-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ github.workspace }}/libs
+          key: libhevtun-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+      - name: Copy libhevtun
+        run: cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+
+      - name: Overlay Tropa files onto AndroidLibXrayLite
+        id: lib
+        run: |
+          cd AndroidLibXrayLite
+          git fetch --no-tags "https://github.com/${LIB_REPO}.git" "${LIB_BRANCH}:refs/remotes/tropa/${LIB_BRANCH}"
+          for f in $(git ls-tree --name-only "refs/remotes/tropa/${LIB_BRANCH}" | grep -E '^tropa_.*\.go$' || true); do
+            git show "refs/remotes/tropa/${LIB_BRANCH}:$f" > "$f"
+            echo "Overlaid $f"
+          done
+          overlay_hash=$(cat tropa_*.go 2>/dev/null | sha256sum | cut -c1-16)
+          echo "key=libv2ray-$(git rev-parse HEAD)-${overlay_hash}-${NDK_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached libv2ray
+        id: lib-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/V2rayNG/app/libs/libv2ray.aar
+          key: ${{ steps.lib.outputs.key }}
+
+      - name: Setup Go
+        if: steps.lib-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'AndroidLibXrayLite/go.mod'
+          cache-dependency-path: 'AndroidLibXrayLite/go.sum'
+
+      - name: Build libv2ray
+        if: steps.lib-cache.outputs.cache-hit != 'true'
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          cd AndroidLibXrayLite
+          mkdir -p assets data
+          bash gen_assets.sh download
+          cp -v data/*.dat assets/
+          gomobile init
+          go mod tidy
+          gomobile bind -v -androidapi 24 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' ./
+          mkdir -p ../V2rayNG/app/libs
+          cp -v libv2ray.aar ../V2rayNG/app/libs/
+
+      - name: Save libv2ray
+        if: steps.lib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ github.workspace }}/V2rayNG/app/libs/libv2ray.aar
+          key: ${{ steps.lib.outputs.key }}
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TROPA_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "::error::Secret TROPA_KEYSTORE_BASE64 is not set"; exit 1; fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/tropa.jks"
+
+      - name: Build APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.TROPA_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TROPA_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.TROPA_KEY_PASSWORD }}
+        run: |
+          cd V2rayNG
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          chmod 755 gradlew
+          ./gradlew --console=plain assemblePlaystoreRelease \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/tropa.jks" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+          ls -la app/build/outputs/apk/playstore/release/
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: tropa-arm64-v8a
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/playstore/release/*arm64-v8a*.apk
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: tropa-armeabi-v7a
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/playstore/release/*armeabi-v7a*.apk
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: tropa-universal
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/playstore/release/*universal*.apk
+
+      - name: Publish release
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          notes="V2rayNG/app/src/tropa/changelog/${TAG}.md"
+          apks=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*{arm64-v8a,armeabi-v7a,universal}*.apk)
+          if [ -f "$notes" ]; then
+            gh release create "$TAG" $apks --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Тропа ${TAG#v}" --notes-file "$notes"
+          else
+            gh release create "$TAG" $apks --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Тропа ${TAG#v}" --generate-notes
+          fi
