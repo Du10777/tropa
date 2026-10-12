@@ -222,3 +222,6 @@ dependencies {
     testImplementation(libs.mockito.kotlin)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 }
+
+// FORK: Tropa build overlay, keeps fork-specific build logic out of upstream lines.
+apply(from = "tropa.gradle")

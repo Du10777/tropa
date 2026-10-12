@@ -1,0 +1,45 @@
+// Tropa build overlay.
+//
+// Everything fork-specific in the build lives here, so upstream files only carry the single
+// `apply(from = "tropa.gradle")` hook at the end of build.gradle.kts. Because it is applied last,
+// this script runs after the upstream configuration and may override it.
+
+def tropaVersionName = '0.1.0'
+def upstreamVersionName = android.defaultConfig.versionName
+
+def versionParts = tropaVersionName.tokenize('.').collect { it as int }
+def tropaVersionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+
+android {
+    ndkVersion = '30.0.16248370'
+
+    defaultConfig {
+        applicationId = 'io.github.du10777.tropa'
+        versionName = tropaVersionName
+        versionCode = tropaVersionCode
+        buildConfigField 'String', 'UPSTREAM_VERSION_NAME', "\"${upstreamVersionName}\""
+    }
+
+    // Build type source sets outrank main and the flavors, so these resources replace the
+    // upstream ones (app name, tile and notification channel labels).
+    sourceSets {
+        debug.res.srcDirs += 'src/tropa/res-override'
+        release.res.srcDirs += 'src/tropa/res-override'
+    }
+
+    // Registered after the upstream callback, so the Tropa names and version code win.
+    applicationVariants.all { variant ->
+        variant.outputs.each { output ->
+            def abi = output.getFilter('ABI') ?: 'universal'
+            output.outputFileName = "tropa_${tropaVersionName}_${abi}.apk"
+            output.versionCodeOverride = tropaVersionCode
+        }
+    }
+}
+
+// Tropa ships the playstore flavor only (no applicationId suffix), so the fdroid variants are skipped.
+androidComponents {
+    beforeVariants(selector().withFlavor(new kotlin.Pair('distribution', 'fdroid'))) { variantBuilder ->
+        variantBuilder.enable = false
+    }
+}
