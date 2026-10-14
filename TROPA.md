@@ -15,8 +15,9 @@ upstream changes can be merged with a plain `git merge` and conflicts stay rare 
 - `V2rayNG/app/tropa.gradle` — all fork-specific build logic: application id, version, APK names,
   resource overlays, disabled fdroid variants.
 - `V2rayNG/app/src/tropa/` — everything else of Tropa:
-  - `java/io/github/du10777/tropa/` — Kotlin sources (`data/` storage and link parsing,
-    `service/` service state, `ui/` Compose screens);
+  - `java/io/github/du10777/tropa/` — Kotlin sources (`data/` storage, link parsing, server plans
+    and selection; `service/` service state and the connection watchdog, which runs in the VPN
+    service process; `ui/` Compose screens);
   - `res/` — Tropa resources, every name prefixed with `tropa_`;
   - `res-override/` — resources attached to the build type source sets, so they override upstream
     ones: app name and labels, launcher and notification icons;
@@ -27,7 +28,9 @@ upstream changes can be merged with a plain `git merge` and conflicts stay rare 
 - `.github/workflows/tropa-build.yml` — CI: builds `libv2ray.aar` from the AndroidLibXrayLite commit
   pinned by the submodule plus our `tropa_*.go` files, builds hev, signs and uploads the APKs.
 - `.github/README.md` — the repository front page (GitHub prefers it over the upstream `README.md`).
-- AndroidLibXrayLite fork: only new `tropa_*.go` files.
+- AndroidLibXrayLite fork: only new `tropa_*.go` files. `tropa_api.go` adds `TropaProbe` (fetch a URL
+  through the running core, optionally forced through one outbound), `TropaOverrideBalancer` and
+  `TropaBalancerTarget` (steer a balancer in process, no gRPC port).
 
 ## Changes to upstream files
 
@@ -37,6 +40,7 @@ Every change to a file that also exists upstream is listed here and marked with 
 |---|---|---|
 | `V2rayNG/app/build.gradle.kts` | `apply(from = "tropa.gradle")` at the end | single hook for the build overlay |
 | `V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainActivity.kt` | `BackHandler` finishes the screen unless it is the task root | Back from the advanced mode returns to the Tropa screen instead of hiding the app |
+| `V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt` | `coreController` and `reloadCore()` are `internal` instead of `private` | the watchdog probes servers, steers the balancer and reconnects without dropping the VPN |
 
 ## Building locally
 

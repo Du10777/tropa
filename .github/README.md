@@ -1,10 +1,10 @@
 # Тропа
 
-Простой Android-клиент для обхода блокировок на ядре [Xray](https://github.com/XTLS/Xray-core). Форк [2dust/v2rayNG](https://github.com/2dust/v2rayNG).
+Простой Android-клиент на ядре [Xray](https://github.com/XTLS/Xray-core). Форк [2dust/v2rayNG](https://github.com/2dust/v2rayNG).
 
 *A simple Android client built on v2rayNG: one button, a connection status you can trust and self-healing connectivity. The UI is in Russian; translations are welcome.*
 
-> Статус: в разработке. Сейчас собирается v2rayNG «как есть» под именем «Тропа»; простой интерфейс появится в следующих версиях.
+> Статус: в разработке, первые версии проверяются на телефонах.
 
 ## Чем будет отличаться от v2rayNG
 
