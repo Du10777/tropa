@@ -102,6 +102,21 @@
         <activity
             android:name="io.github.du10777.tropa.ui.permissions.TropaPermissionsActivity"
             android:exported="false" />
+        <activity
+            android:name="io.github.du10777.tropa.ui.settings.TropaChecksActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Connection watchdog: lives in the VPN service process, starts and stops with the core. -->
+        <receiver
+            android:name="io.github.du10777.tropa.service.TropaServiceEventsReceiver"
+            android:exported="false"
+            android:process=":daemon">
+            <intent-filter>
+                <action android:name="${applicationId}.action.activity" />
+                <action android:name="io.github.du10777.tropa.action.WAKE_WATCHDOG" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

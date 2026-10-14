@@ -13,6 +13,7 @@ import io.github.du10777.tropa.data.LinkParser
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.CoreState
 import io.github.du10777.tropa.service.ServiceStateMonitor
+import io.github.du10777.tropa.service.WatchState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -39,6 +40,8 @@ data class MainUiState(
     val connectedSince: Long = 0L,
     val clipOffer: ClipOffer? = null,
     val busy: Boolean = false,
+    /** Watchdog report: channel check, active server, reconnects (null while the core is down). */
+    val watch: WatchState? = null,
 )
 
 sealed interface MainEvent {
@@ -60,9 +63,17 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
         reload()
         monitor.start()
         viewModelScope.launch {
-            combine(monitor.state, monitor.lastError) { core, error -> core to error }.collect { (core, error) ->
-                _state.update { it.copy(core = core, error = error, connectedSince = TropaPrefs.connectedSince) }
-            }
+            combine(monitor.state, monitor.lastError, monitor.watch) { core, error, watch -> Triple(core, error, watch) }
+                .collect { (core, error, watch) ->
+                    _state.update {
+                        it.copy(
+                            core = core,
+                            error = error,
+                            connectedSince = TropaPrefs.connectedSince,
+                            watch = watch.takeIf { core == CoreState.Running },
+                        )
+                    }
+                }
         }
         viewModelScope.launch {
             delay(SILENCE_TIMEOUT_MS)

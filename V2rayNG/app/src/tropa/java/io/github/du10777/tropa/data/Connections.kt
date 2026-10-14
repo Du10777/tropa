@@ -1,7 +1,10 @@
 package io.github.du10777.tropa.data
 
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.SubscriptionItem
+import com.v2ray.ang.enums.BalancerStrategyType
+import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
@@ -23,6 +26,14 @@ data class Connection(
     val isSubscription: Boolean get() = url.isNotEmpty()
 }
 
+/** A config of a connection for the details screen: its servers and whether Tropa runs it. */
+data class ProfileDetails(
+    val name: String,
+    val inUse: Boolean,
+    val balanced: Boolean,
+    val nodes: List<Node>,
+)
+
 sealed interface AddResult {
     data class Added(val id: String) : AddResult
     data class AlreadyAdded(val id: String) : AddResult
@@ -39,6 +50,9 @@ object Connections {
     private const val DEFAULT_UPDATE_INTERVAL_MINUTES = 12 * 60L
     private const val MIN_UPDATE_INTERVAL_MINUTES = 15L
 
+    /** Hidden upstream policy group that balances the plain servers of a connection. */
+    private const val POLICY_GROUP_PREFIX = "tropa-pg-"
+
     fun list(): List<Connection> =
         MmkvManager.decodeSubscriptions()
             .map { cache ->
@@ -46,7 +60,7 @@ object Connections {
                     id = cache.guid,
                     name = cache.subscription.remarks,
                     url = cache.subscription.url,
-                    serverCount = MmkvManager.decodeServerList(cache.guid).size,
+                    serverCount = MmkvManager.decodeServerList(cache.guid).count { !it.startsWith(POLICY_GROUP_PREFIX) },
                     lastUpdated = cache.subscription.lastUpdated,
                     info = SubscriptionInfo.parse(TropaPrefs.subscriptionInfo(cache.guid)),
                 )
@@ -72,11 +86,69 @@ object Connections {
         serverToStart(id)?.let(MmkvManager::setSelectServer)
     }
 
-    /** Server profile to start for a connection: the selected one if it belongs to it, else the first. */
+    /**
+     * Profile to start for a connection:
+     * - a config from the server that already balances several servers (3X-UI "Sub Balancers");
+     * - several plain servers: a hidden upstream policy group over all of them, so the watchdog
+     *   can steer new connections between them;
+     * - otherwise the selected server of the connection, or its first one.
+     */
     fun serverToStart(id: String): String? {
         val servers = MmkvManager.decodeServerList(id)
+        if (servers.isEmpty()) return null
+        val profiles = servers.mapNotNull { guid -> MmkvManager.decodeServerConfig(guid)?.let { guid to it } }
+        profiles.firstOrNull { (guid, profile) -> profile.configType == EConfigType.CUSTOM && planOf(guid, profile).isBalanced }
+            ?.let { return it.first }
+        val plain = profiles.filter { (_, profile) -> profile.configType.isPlainServer() }
+        if (plain.size >= 2) return ensurePolicyGroup(id)
         val selected = MmkvManager.getSelectServer()
-        return if (selected != null && selected in servers) selected else servers.firstOrNull()
+        return if (selected != null && selected in servers) selected else servers.first()
+    }
+
+    /** Configs of a connection with their servers, for the details screen. */
+    fun details(id: String): List<ProfileDetails> {
+        val running = serverToStart(id)
+        val groupInUse = running?.startsWith(POLICY_GROUP_PREFIX) == true
+        return MmkvManager.decodeServerList(id).mapNotNull { guid ->
+            val profile = MmkvManager.decodeServerConfig(guid) ?: return@mapNotNull null
+            if (profile.configType == EConfigType.CUSTOM) {
+                val plan = planOf(guid, profile)
+                ProfileDetails(profile.remarks, inUse = guid == running, balanced = plan.isBalanced, nodes = plan.proxies)
+            } else {
+                val address = listOfNotNull(profile.server, profile.serverPort).joinToString(":").ifEmpty { null }
+                val transport = listOfNotNull(profile.network, profile.security?.takeIf { it.isNotEmpty() && it != "none" })
+                    .joinToString(", ").ifEmpty { null }
+                val node = Node(guid, profile.remarks, NodePlanner.displayProtocol(profile.configType.name), address, transport)
+                ProfileDetails(profile.remarks, inUse = guid == running || (groupInUse && profile.configType.isPlainServer()), balanced = false, nodes = listOf(node))
+            }
+        }
+    }
+
+    private fun planOf(guid: String, profile: ProfileItem): NodePlan =
+        if (profile.configType == EConfigType.CUSTOM) {
+            NodePlanner.fromConfigJson(MmkvManager.decodeServerRaw(guid).orEmpty())
+        } else {
+            NodePlan(null, emptyList())
+        }
+
+    private fun EConfigType.isPlainServer(): Boolean =
+        this != EConfigType.CUSTOM && this != EConfigType.POLICYGROUP && this != EConfigType.PROXYCHAIN
+
+    private fun ensurePolicyGroup(id: String): String {
+        val guid = POLICY_GROUP_PREFIX + id
+        val name = MmkvManager.decodeSubscription(id)?.remarks.orEmpty().ifEmpty { "Tropa" }
+        val existing = MmkvManager.decodeServerConfig(guid)
+        if (existing?.policyGroupSubscriptionId != id || existing.remarks != name) {
+            val profile = ProfileItem.create(EConfigType.POLICYGROUP).apply {
+                remarks = name
+                policyGroupSubscriptionId = id
+                // leastPing keeps balancing if the watchdog is not running; Tropa overrides it otherwise.
+                policyGroupType = BalancerStrategyType.LEAST_PING.policyGroupTypeValue
+                subscriptionId = ""
+            }
+            MmkvManager.encodeServerConfig(guid, profile)
+        }
+        return guid
     }
 
     /** Downloads a subscription and stores it as a new connection. Blocking: call off the main thread. */
@@ -151,6 +223,7 @@ object Connections {
 
     fun delete(id: String) {
         SettingsManager.removeSubscriptionWithDefault(id)
+        MmkvManager.removeServer(POLICY_GROUP_PREFIX + id)
         TropaPrefs.setSubscriptionInfo(id, null)
         if (TropaPrefs.activeConnectionId == id) {
             TropaPrefs.activeConnectionId = list().firstOrNull()?.id

@@ -6,8 +6,13 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.du10777.tropa.data.Connection
+import io.github.du10777.tropa.data.Node
+import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.data.SubscriptionInfo
 import io.github.du10777.tropa.service.CoreState
+import io.github.du10777.tropa.service.WatchNode
+import io.github.du10777.tropa.service.WatchPhase
+import io.github.du10777.tropa.service.WatchState
 import io.github.du10777.tropa.ui.main.ClipOffer
 import io.github.du10777.tropa.ui.main.MainActions
 import io.github.du10777.tropa.ui.main.MainUiState
@@ -55,7 +60,22 @@ class TropaScreenshotTest {
         captureScreenRoboImage("build/tropa-screens/$name.png")
     }
 
-    private fun loaded(core: CoreState, clip: Boolean = false, error: String? = null) = MainUiState(
+    private val nodes = listOf(
+        WatchNode("bal-1-vless", "VLESS · entry.example.org", alive = true, latencyMs = 48, active = true),
+        WatchNode("bal-1-wireguard", "WireGuard · 127.0.0.1", alive = false, latencyMs = null, active = false),
+    )
+
+    private fun watch(phase: WatchPhase) = WatchState(
+        phase = phase,
+        activeName = "VLESS · entry.example.org",
+        latencyMs = 48,
+        checkedAt = System.currentTimeMillis() - 12_000,
+        attempt = 3,
+        nextRetryAt = System.currentTimeMillis() + 10_000,
+        nodes = nodes,
+    )
+
+    private fun loaded(core: CoreState, clip: Boolean = false, error: String? = null, watch: WatchState? = null) = MainUiState(
         loaded = true,
         connections = listOf(connection),
         active = connection,
@@ -63,6 +83,7 @@ class TropaScreenshotTest {
         error = error,
         connectedSince = System.currentTimeMillis() - 493_000,
         clipOffer = if (clip) ClipOffer("x", "xsub://abc") else null,
+        watch = watch,
     )
 
     @Test
@@ -81,8 +102,38 @@ class TropaScreenshotTest {
     }
 
     @Test
+    fun checking() = shot("4a_checking") {
+        TropaMainScreen(loaded(CoreState.Running, watch = watch(WatchPhase.CHECKING)), showAddSheet = false, actions = noop)
+    }
+
+    @Test
     fun connected() = shot("4_connected") {
-        TropaMainScreen(loaded(CoreState.Running), showAddSheet = false, actions = noop)
+        TropaMainScreen(loaded(CoreState.Running, watch = watch(WatchPhase.CONNECTED)), showAddSheet = false, actions = noop)
+    }
+
+    @Test
+    fun noServer() = shot("4b_no_server") {
+        TropaMainScreen(loaded(CoreState.Running, watch = watch(WatchPhase.NO_SERVER)), showAddSheet = false, actions = noop)
+    }
+
+    @Test
+    fun details() = shot("7_details") {
+        TropaMainScreen(
+            loaded(CoreState.Running, watch = watch(WatchPhase.CONNECTED)),
+            showAddSheet = false,
+            actions = noop,
+            details = listOf(
+                ProfileDetails("Kazan", inUse = false, balanced = false, nodes = listOf(Node("proxy", "", "VLESS", "entry.example.org:443", "xhttp, tls"))),
+                ProfileDetails("Kazan FreeTurn", inUse = false, balanced = false, nodes = listOf(Node("proxy", "", "WireGuard", "127.0.0.1:9000", null))),
+                ProfileDetails(
+                    "Kazan + FreeTurn", inUse = true, balanced = true,
+                    nodes = listOf(
+                        Node("bal-1-vless", "VLESS · entry.example.org", "VLESS", "entry.example.org:443", "xhttp, tls"),
+                        Node("bal-1-wireguard", "WireGuard · 127.0.0.1", "WireGuard", "127.0.0.1:9000", null),
+                    ),
+                ),
+            ),
+        )
     }
 
     @Test

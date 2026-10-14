@@ -29,10 +29,18 @@ class ServiceStateMonitor(context: Context) {
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
+    /** Latest watchdog report (channel check, reconnects); null while the core is down. */
+    private val _watch = MutableStateFlow(WatchStateStore.read())
+    val watch: StateFlow<WatchState?> = _watch.asStateFlow()
+
     private var registered = false
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == WatchStateStore.ACTION) {
+                _watch.value = WatchStateStore.read()
+                return
+            }
             when (intent?.getIntExtra("key", 0)) {
                 AppConfig.MSG_STATE_RUNNING, AppConfig.MSG_STATE_START_SUCCESS -> {
                     if (TropaPrefs.connectedSince == 0L) TropaPrefs.connectedSince = System.currentTimeMillis()
@@ -42,6 +50,7 @@ class ServiceStateMonitor(context: Context) {
 
                 AppConfig.MSG_STATE_NOT_RUNNING, AppConfig.MSG_STATE_STOP_SUCCESS -> {
                     TropaPrefs.connectedSince = 0L
+                    _watch.value = null
                     if (_state.value != CoreState.Failed) _state.value = CoreState.Stopped
                 }
 
@@ -56,13 +65,15 @@ class ServiceStateMonitor(context: Context) {
 
     fun start() {
         if (registered) return
-        ContextCompat.registerReceiver(app, receiver, IntentFilter(AppConfig.BROADCAST_ACTION_ACTIVITY), Utils.receiverFlags())
+        val filter = IntentFilter(AppConfig.BROADCAST_ACTION_ACTIVITY).apply { addAction(WatchStateStore.ACTION) }
+        ContextCompat.registerReceiver(app, receiver, filter, Utils.receiverFlags())
         registered = true
         requestState()
     }
 
     /** Asks a running service to report itself; call when the screen comes back. */
     fun requestState() {
+        _watch.value = WatchStateStore.read()
         MessageHelper.sendMsg2Service(app, AppConfig.MSG_REGISTER_CLIENT, "")
     }
 
@@ -70,6 +81,7 @@ class ServiceStateMonitor(context: Context) {
     fun resolveSilence() {
         if (_state.value == CoreState.Unknown) {
             TropaPrefs.connectedSince = 0L
+            _watch.value = null
             _state.value = CoreState.Stopped
         }
     }

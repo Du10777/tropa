@@ -4,7 +4,9 @@ import android.text.format.Formatter
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +52,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -58,7 +65,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
 import io.github.du10777.tropa.data.Connection
+import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.service.CoreState
+import io.github.du10777.tropa.service.WatchPhase
+import io.github.du10777.tropa.service.WatchState
 import io.github.du10777.tropa.ui.common.ActionRow
 import io.github.du10777.tropa.ui.theme.TropaColors
 import kotlinx.coroutines.delay
@@ -78,6 +88,10 @@ class MainActions(
     val onOpenSettings: () -> Unit,
     val onAcceptClip: () -> Unit,
     val onDismissClip: () -> Unit,
+    val onRefreshActive: () -> Unit = {},
+    val onDeleteActive: () -> Unit = {},
+    val onShowDetails: () -> Unit = {},
+    val onCloseDetails: () -> Unit = {},
 )
 
 /**
@@ -85,7 +99,12 @@ class MainActions(
  * connection card with the switch on the right and the bottom bar (connections, add, settings).
  */
 @Composable
-fun TropaMainScreen(state: MainUiState, showAddSheet: Boolean, actions: MainActions) {
+fun TropaMainScreen(
+    state: MainUiState,
+    showAddSheet: Boolean,
+    actions: MainActions,
+    details: List<ProfileDetails>? = null,
+) {
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.systemBarsPadding()) {
             AppBar()
@@ -116,6 +135,7 @@ fun TropaMainScreen(state: MainUiState, showAddSheet: Boolean, actions: MainActi
         }
     }
     if (showAddSheet) AddConnectionSheet(actions)
+    if (details != null) DetailsSheet(details, state.watch, actions.onCloseDetails)
 }
 
 @Composable
@@ -184,7 +204,7 @@ private fun AddActions(actions: MainActions, container: Color = MaterialTheme.co
 @Composable
 private fun ConnectionContent(state: MainUiState, actions: MainActions) {
     if (state.clipOffer != null) ClipboardBanner(actions)
-    if (state.core == CoreState.Running) OnlineStats(state.connectedSince)
+    if (state.core == CoreState.Running) OnlineStats(state.connectedSince, state.watch)
     StatusBlock(state)
     state.active?.let { ConnectionCard(it, state, actions) }
 }
@@ -228,54 +248,140 @@ private fun ClipboardBanner(actions: MainActions) {
 }
 
 @Composable
-private fun OnlineStats(connectedSince: Long) {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(connectedSince) {
-        while (true) {
-            now = System.currentTimeMillis()
-            delay(1000)
-        }
-    }
+private fun OnlineStats(connectedSince: Long, watch: WatchState?) {
+    val now = rememberNow()
     val seconds = if (connectedSince > 0) ((now - connectedSince) / 1000).coerceAtLeast(0) else 0
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
-            Text(stringResource(R.string.tropa_stat_online), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
+    val latency = watch?.latencyMs?.takeIf { watch.phase == WatchPhase.CONNECTED }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+        StatTile(
+            label = stringResource(R.string.tropa_stat_online),
+            value = String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60),
+            modifier = Modifier.weight(1f),
+        )
+        if (latency != null) {
+            StatTile(
+                label = stringResource(R.string.tropa_stat_latency),
+                value = stringResource(R.string.tropa_value_ms, latency),
+                modifier = Modifier.weight(1f),
             )
         }
     }
 }
 
 @Composable
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp, modifier = modifier) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+            Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/** Current time, refreshed every second while shown. */
+@Composable
+private fun rememberNow(): Long {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
+    return now
+}
+
+/** What the status block shows: colours, title and hint. */
+private enum class StatusLook { IDLE, PROGRESS, GOOD, BAD }
+
+private fun statusLook(state: MainUiState): StatusLook = when (state.core) {
+    CoreState.Starting -> StatusLook.PROGRESS
+    CoreState.Failed -> StatusLook.BAD
+    CoreState.Stopped, CoreState.Unknown -> StatusLook.IDLE
+    CoreState.Running -> when (state.watch?.phase) {
+        null, WatchPhase.CHECKING -> StatusLook.PROGRESS
+        WatchPhase.CONNECTED, WatchPhase.CHECKS_OFF -> StatusLook.GOOD
+        WatchPhase.NO_SERVER, WatchPhase.NO_INTERNET -> StatusLook.BAD
+    }
+}
+
+private fun accentOf(look: StatusLook): Color = when (look) {
+    StatusLook.IDLE -> TropaColors.Idle
+    StatusLook.PROGRESS -> TropaColors.Checking
+    StatusLook.GOOD -> TropaColors.Connected
+    StatusLook.BAD -> TropaColors.Problem
+}
+
+private fun containerOf(look: StatusLook): Color = when (look) {
+    StatusLook.IDLE -> TropaColors.IdleContainer
+    StatusLook.PROGRESS -> TropaColors.CheckingContainer
+    StatusLook.GOOD -> TropaColors.ConnectedContainer
+    StatusLook.BAD -> TropaColors.ProblemContainer
+}
+
+@Composable
 private fun StatusBlock(state: MainUiState) {
-    val (container, accent) = when (state.core) {
-        CoreState.Running -> TropaColors.ConnectedContainer to TropaColors.Connected
-        CoreState.Starting -> TropaColors.CheckingContainer to TropaColors.Checking
-        CoreState.Failed -> TropaColors.ProblemContainer to TropaColors.Problem
-        CoreState.Stopped, CoreState.Unknown -> TropaColors.IdleContainer to TropaColors.Idle
+    val look = statusLook(state)
+    val accent = accentOf(look)
+    val watch = state.watch
+    val now = rememberNow()
+    val title: String
+    val hint: String
+    when (state.core) {
+        CoreState.Starting -> {
+            title = stringResource(R.string.tropa_status_connecting)
+            hint = stringResource(R.string.tropa_status_connecting_hint)
+        }
+
+        CoreState.Failed -> {
+            title = stringResource(R.string.tropa_status_error)
+            hint = state.error.orEmpty()
+        }
+
+        CoreState.Stopped, CoreState.Unknown -> {
+            title = stringResource(R.string.tropa_status_disconnected)
+            hint = stringResource(R.string.tropa_status_disconnected_hint)
+        }
+
+        CoreState.Running -> when (watch?.phase) {
+            null, WatchPhase.CHECKING -> {
+                title = stringResource(R.string.tropa_status_checking)
+                hint = stringResource(R.string.tropa_status_checking_hint)
+            }
+
+            WatchPhase.CONNECTED -> {
+                title = stringResource(R.string.tropa_status_connected)
+                hint = listOfNotNull(
+                    watch.checkedAt.takeIf { it > 0 }?.let { stringResource(R.string.tropa_status_checked_ago, agoText(now - it)) },
+                    watch.activeName,
+                ).joinToString(" · ")
+            }
+
+            WatchPhase.NO_SERVER -> {
+                title = stringResource(R.string.tropa_status_no_server)
+                val wait = ((watch.nextRetryAt - now) / 1000).coerceAtLeast(0).toInt()
+                hint = stringResource(R.string.tropa_status_no_server_hint, watch.attempt, wait)
+            }
+
+            WatchPhase.NO_INTERNET -> {
+                title = stringResource(R.string.tropa_status_no_internet)
+                hint = stringResource(R.string.tropa_status_no_internet_hint)
+            }
+
+            WatchPhase.CHECKS_OFF -> {
+                title = stringResource(R.string.tropa_status_connected)
+                hint = stringResource(R.string.tropa_status_checks_off_hint)
+            }
+        }
     }
-    val title = when (state.core) {
-        CoreState.Running -> R.string.tropa_status_connected
-        CoreState.Starting -> R.string.tropa_status_connecting
-        CoreState.Failed -> R.string.tropa_status_error
-        CoreState.Stopped, CoreState.Unknown -> R.string.tropa_status_disconnected
-    }
-    val hint = when (state.core) {
-        CoreState.Running -> stringResource(R.string.tropa_status_connected_hint)
-        CoreState.Starting -> stringResource(R.string.tropa_status_connecting_hint)
-        CoreState.Failed -> state.error.orEmpty()
-        CoreState.Stopped, CoreState.Unknown -> stringResource(R.string.tropa_status_disconnected_hint)
-    }
-    Surface(shape = RoundedCornerShape(18.dp), color = container, modifier = Modifier.fillMaxWidth()) {
+    Surface(shape = RoundedCornerShape(18.dp), color = containerOf(look), modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (state.core == CoreState.Starting) {
+            val reconnecting = state.core == CoreState.Running && watch?.phase == WatchPhase.NO_SERVER
+            if (look == StatusLook.PROGRESS || reconnecting) {
                 CircularProgressIndicator(color = accent, strokeWidth = 3.dp, modifier = Modifier.size(18.dp))
             } else {
                 Box(
@@ -286,7 +392,7 @@ private fun StatusBlock(state: MainUiState) {
                 )
             }
             Column {
-                Text(stringResource(title), fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = accent)
+                Text(title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = accent)
                 if (hint.isNotEmpty()) {
                     Text(hint, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -296,15 +402,63 @@ private fun StatusBlock(state: MainUiState) {
 }
 
 @Composable
+private fun agoText(millis: Long): String {
+    val seconds = (millis / 1000).coerceAtLeast(0)
+    return if (seconds < 60) {
+        stringResource(R.string.tropa_ago_seconds, seconds.toInt())
+    } else {
+        stringResource(R.string.tropa_ago_minutes, (seconds / 60).toInt())
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun ConnectionCard(connection: Connection, state: MainUiState, actions: MainActions) {
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    var menuOpen by remember { mutableStateOf(false) }
     val switchOn = state.core == CoreState.Running || state.core == CoreState.Starting
-    val accent = when (state.core) {
-        CoreState.Running -> TropaColors.Connected
-        CoreState.Starting -> TropaColors.Checking
-        else -> TropaColors.Problem
-    }
-    Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+    val accent = accentOf(statusLook(state))
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .combinedClickable(
+                onClick = {},
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    menuOpen = true
+                },
+            ),
+    ) {
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            if (connection.isSubscription) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.tropa_connection_refresh)) },
+                    onClick = {
+                        menuOpen = false
+                        actions.onRefreshActive()
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.tropa_menu_details)) },
+                onClick = {
+                    menuOpen = false
+                    actions.onShowDetails()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.tropa_connection_delete), color = TropaColors.Problem) },
+                onClick = {
+                    menuOpen = false
+                    actions.onDeleteActive()
+                },
+            )
+        }
         Column(Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -440,6 +594,90 @@ private fun AddConnectionSheet(actions: MainActions) {
             AddActions(actions, container = MaterialTheme.colorScheme.surfaceVariant)
             TextButton(onClick = actions.onCloseAddSheet, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 Text(stringResource(R.string.tropa_cancel), fontSize = 15.sp)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DetailsSheet(details: List<ProfileDetails>, watch: WatchState?, onClose: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onClose, containerColor = MaterialTheme.colorScheme.surface) {
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                stringResource(R.string.tropa_menu_details),
+                fontSize = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+            if (details.isEmpty()) {
+                Text(stringResource(R.string.tropa_details_no_servers), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (details.count { it.inUse } > 1) {
+                Text(stringResource(R.string.tropa_details_together), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            details.forEach { profile -> ProfileBlock(profile, watch) }
+        }
+    }
+}
+
+@Composable
+private fun ProfileBlock(profile: ProfileDetails, watch: WatchState?) {
+    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    profile.name.ifEmpty { stringResource(R.string.tropa_connection_default_name) },
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (profile.inUse) {
+                    Surface(shape = RoundedCornerShape(10.dp), color = TropaColors.Brand) {
+                        Text(
+                            stringResource(R.string.tropa_details_in_use),
+                            color = TropaColors.OnBrand,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+            if (profile.balanced) {
+                Text(stringResource(R.string.tropa_details_balanced), fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            profile.nodes.forEach { node ->
+                val live = watch?.nodes?.firstOrNull { it.tag == node.tag || (node.name.isNotEmpty() && it.name == node.name) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when (live?.alive) {
+                                    true -> TropaColors.Connected
+                                    false -> TropaColors.Problem
+                                    null -> TropaColors.Idle
+                                }
+                            )
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(listOfNotNull(node.protocol.ifEmpty { null }, node.address).joinToString(" · "), fontSize = 14.sp)
+                        node.transport?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                    if (live?.alive == true && live.latencyMs != null) {
+                        Text(stringResource(R.string.tropa_value_ms, live.latencyMs), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (live?.active == true) {
+                        Surface(shape = CircleShape, color = TropaColors.Brand, modifier = Modifier.size(8.dp)) {}
+                    }
+                }
             }
         }
     }

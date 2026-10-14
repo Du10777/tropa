@@ -1,6 +1,8 @@
 package io.github.du10777.tropa.ui.settings
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.provider.Settings
 import androidx.annotation.DrawableRes
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.clickable
@@ -48,7 +50,9 @@ import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.main.MainActivity
 import com.v2ray.ang.ui.perappproxy.PerAppProxyActivity
 import com.v2ray.ang.util.Utils
+import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.TropaPrefs
+import io.github.du10777.tropa.service.WatchStateStore
 import io.github.du10777.tropa.ui.common.TropaTopBar
 import io.github.du10777.tropa.ui.permissions.TropaPermissionsActivity
 import io.github.du10777.tropa.ui.theme.TropaColors
@@ -62,6 +66,8 @@ class TropaSettingsActivity : BaseComponentActivity() {
     override fun ScreenContent() {
         TropaTheme {
             var choosingLanguage by remember { mutableStateOf(false) }
+            var killSwitch by remember { mutableStateOf(CheckSettings.killSwitch) }
+            var explainKillSwitch by remember { mutableStateOf(false) }
             Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
                 Column(Modifier.systemBarsPadding()) {
                     TropaTopBar(stringResource(R.string.tropa_settings_title), onBack = ::finish)
@@ -80,6 +86,19 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         SettingsRow(R.drawable.ic_per_apps_24dp, stringResource(R.string.tropa_settings_per_app), null) {
                             startActivity(Intent(this@TropaSettingsActivity, PerAppProxyActivity::class.java))
                         }
+                        SettingsRow(R.drawable.ic_check_update_24dp, stringResource(R.string.tropa_settings_checks), null) {
+                            startActivity(Intent(this@TropaSettingsActivity, TropaChecksActivity::class.java))
+                        }
+                        KillSwitchRow(
+                            enabled = killSwitch,
+                            status = killSwitchStatus(),
+                            onChange = { enabled ->
+                                killSwitch = enabled
+                                CheckSettings.killSwitch = enabled
+                                if (enabled) explainKillSwitch = true
+                            },
+                            onClick = { if (killSwitch) explainKillSwitch = true },
+                        )
                         AdvancedModeRow(advancedMode) { enabled ->
                             advancedMode = enabled
                             TropaPrefs.advancedMode = enabled
@@ -96,6 +115,22 @@ class TropaSettingsActivity : BaseComponentActivity() {
                     }
                 }
             }
+            if (explainKillSwitch) {
+                AlertDialog(
+                    onDismissRequest = { explainKillSwitch = false },
+                    title = { Text(stringResource(R.string.tropa_settings_kill_switch)) },
+                    text = { Text(stringResource(R.string.tropa_kill_switch_explain)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            explainKillSwitch = false
+                            openVpnSettings()
+                        }) { Text(stringResource(R.string.tropa_kill_switch_open)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { explainKillSwitch = false }) { Text(stringResource(R.string.tropa_cancel)) }
+                    },
+                )
+            }
             if (choosingLanguage) {
                 LanguageDialog(
                     onPick = { code ->
@@ -106,6 +141,22 @@ class TropaSettingsActivity : BaseComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun openVpnSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+        } catch (e: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    }
+
+    /** What Android reports about always-on VPN with lockdown (only while the VPN runs, Android 10+). */
+    @Composable
+    private fun killSwitchStatus(): String = when (WatchStateStore.read()?.lockdown) {
+        true -> stringResource(R.string.tropa_kill_switch_status_on)
+        false -> stringResource(R.string.tropa_kill_switch_status_off)
+        null -> stringResource(R.string.tropa_kill_switch_status_unknown)
     }
 
     @Composable
@@ -217,4 +268,34 @@ private fun LanguageDialog(onPick: (String) -> Unit, onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.tropa_cancel)) } },
     )
+}
+
+@Composable
+private fun KillSwitchRow(enabled: Boolean, status: String, onChange: (Boolean) -> Unit, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(painterResource(R.drawable.ic_privacy_24dp), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.tropa_settings_kill_switch), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.tropa_kill_switch_hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (enabled) Text(status, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onChange,
+                colors = SwitchDefaults.colors(checkedTrackColor = TropaColors.Brand, checkedThumbColor = Color.White),
+            )
+        }
+    }
 }

@@ -27,8 +27,10 @@ import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.HelperBaseComponentActivity
 import com.v2ray.ang.ui.main.MainActivity
 import io.github.du10777.tropa.data.Connections
+import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.CoreState
+import io.github.du10777.tropa.ui.common.ConfirmDialog
 import io.github.du10777.tropa.ui.common.PermissionExplanationDialog
 import io.github.du10777.tropa.ui.connections.TropaConnectionsActivity
 import io.github.du10777.tropa.ui.link.TropaLinkActivity
@@ -53,6 +55,12 @@ class TropaMainActivity : HelperBaseComponentActivity() {
 
     private var explanation by mutableStateOf<PendingExplanation?>(null)
     private var showAddSheet by mutableStateOf(false)
+    private var details by mutableStateOf<List<ProfileDetails>?>(null)
+
+    /** A yes/no question waiting for an answer (delete, disconnect with lockdown). */
+    private class PendingConfirm(val text: String, val note: String?, val onYes: () -> Unit)
+
+    private var confirm by mutableStateOf<PendingConfirm?>(null)
     private var lastClipStamp = -1L
 
     private val vpnLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -118,6 +126,7 @@ class TropaMainActivity : HelperBaseComponentActivity() {
             TropaMainScreen(
                 state = state,
                 showAddSheet = showAddSheet,
+                details = details,
                 actions = MainActions(
                     onToggle = { on -> if (on) connect() else disconnect() },
                     onAddCopied = {
@@ -138,8 +147,23 @@ class TropaMainActivity : HelperBaseComponentActivity() {
                     onOpenSettings = { startActivity(Intent(this, TropaSettingsActivity::class.java)) },
                     onAcceptClip = { state.clipOffer?.let { viewModel.importText(it.text, defaultName()) } },
                     onDismissClip = viewModel::dismissClipOffer,
+                    onRefreshActive = ::refreshActive,
+                    onDeleteActive = ::askDeleteActive,
+                    onShowDetails = ::showDetails,
+                    onCloseDetails = { details = null },
                 ),
             )
+            confirm?.let { pending ->
+                ConfirmDialog(
+                    text = pending.text,
+                    note = pending.note,
+                    onConfirm = {
+                        confirm = null
+                        pending.onYes()
+                    },
+                    onDismiss = { confirm = null },
+                )
+            }
             explanation?.let { pending ->
                 PermissionExplanationDialog(
                     permission = pending.permission,
@@ -216,7 +240,49 @@ class TropaMainActivity : HelperBaseComponentActivity() {
     }
 
     private fun disconnect() {
-        LauncherManager.stopService(this)
+        if (viewModel.state.value.watch?.lockdown == true) {
+            // With "block connections without VPN" the phone stays offline until the VPN is back.
+            confirm = PendingConfirm(getString(R.string.tropa_disconnect_lockdown), null) { LauncherManager.stopService(this) }
+        } else {
+            LauncherManager.stopService(this)
+        }
+    }
+
+    private fun showDetails() {
+        val id = viewModel.state.value.active?.id ?: return
+        lifecycleScope.launch {
+            details = withContext(Dispatchers.IO) { Connections.details(id) }
+        }
+    }
+
+    private fun refreshActive() {
+        val id = viewModel.state.value.active?.id ?: return
+        val running = viewModel.state.value.core == CoreState.Running
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) { Connections.refresh(id) }
+            toast(if (ok) R.string.tropa_connection_updated else R.string.tropa_connection_update_failed)
+            viewModel.reload()
+            // An update recreates the server profiles: restart on the fresh ones.
+            if (ok && running) {
+                Connections.serverToStart(id)?.let { guid ->
+                    MmkvManager.setSelectServer(guid)
+                    LauncherManager.restartService(this@TropaMainActivity)
+                }
+            }
+        }
+    }
+
+    private fun askDeleteActive() {
+        val active = viewModel.state.value.active ?: return
+        val running = viewModel.state.value.core == CoreState.Running || viewModel.state.value.core == CoreState.Starting
+        confirm = PendingConfirm(
+            text = getString(R.string.tropa_connection_delete_confirm, active.name.ifEmpty { defaultName() }),
+            note = if (running) getString(R.string.tropa_connection_delete_active_note) else null,
+        ) {
+            if (running) LauncherManager.stopService(this)
+            Connections.delete(active.id)
+            viewModel.reload()
+        }
     }
 
     private fun importClipboard() {
