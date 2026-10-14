@@ -27,7 +27,6 @@ import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.HelperBaseComponentActivity
 import com.v2ray.ang.ui.main.MainActivity
 import io.github.du10777.tropa.data.Connections
-import io.github.du10777.tropa.data.ProblemReports
 import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.ui.settings.TropaGeoActivity
 import io.github.du10777.tropa.data.TropaPrefs
@@ -36,6 +35,8 @@ import io.github.du10777.tropa.ui.common.ConfirmDialog
 import io.github.du10777.tropa.ui.common.PermissionExplanationDialog
 import io.github.du10777.tropa.ui.connections.TropaConnectionsActivity
 import io.github.du10777.tropa.ui.link.TropaLinkActivity
+import io.github.du10777.tropa.ui.log.LogActions
+import io.github.du10777.tropa.ui.log.TropaLogActivity
 import io.github.du10777.tropa.ui.permissions.TropaPermission
 import io.github.du10777.tropa.ui.permissions.TropaPermissionRequester
 import io.github.du10777.tropa.ui.settings.TropaSettingsActivity
@@ -153,7 +154,8 @@ class TropaMainActivity : HelperBaseComponentActivity() {
                     onDeleteActive = ::askDeleteActive,
                     onShowDetails = ::showDetails,
                     onCloseDetails = { details = null },
-                    onShareReport = ::shareReport,
+                    onShareLog = { LogActions.share(this) },
+                    onOpenLog = { startActivity(Intent(this, TropaLogActivity::class.java)) },
                     onOpenGeo = { ref -> startActivity(TropaGeoActivity.intent(this, ref.file, ref.code)) },
                 ),
             )
@@ -250,13 +252,6 @@ class TropaMainActivity : HelperBaseComponentActivity() {
         } else {
             LauncherManager.stopService(this)
         }
-    }
-
-    /** Shares what the watchdog tried, for example to Telegram, so problems can be analysed. */
-    private fun shareReport() {
-        val text = ProblemReports.shareText(this, viewModel.state.value.watch)
-        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
-        startActivity(Intent.createChooser(send, getString(R.string.tropa_report_share)))
     }
 
     private fun showDetails() {

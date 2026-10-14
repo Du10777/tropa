@@ -103,6 +103,9 @@
             android:name="io.github.du10777.tropa.ui.permissions.TropaPermissionsActivity"
             android:exported="false" />
         <activity
+            android:name="io.github.du10777.tropa.ui.log.TropaLogActivity"
+            android:exported="false" />
+        <activity
             android:name="io.github.du10777.tropa.ui.settings.TropaGeoActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />

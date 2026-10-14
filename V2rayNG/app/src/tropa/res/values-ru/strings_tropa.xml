@@ -142,13 +142,12 @@
     <string name="tropa_traffic_session">За подключение: ↓ %1$s  ↑ %2$s</string>
     <string name="tropa_unit_mbps">Мбит/с</string>
     <string name="tropa_unit_kbps">Кбит/с</string>
-    <string name="tropa_report_share">Отправить отчёт о проверках</string>
     <string name="tropa_geo_routing">Маршрутизация</string>
     <string name="tropa_geo_direct">Напрямую (мимо VPN):</string>
     <string name="tropa_geo_proxy">Через VPN:</string>
     <string name="tropa_geo_block">Блокируется:</string>
-    <string name="tropa_log_title">Журнал проверок</string>
-    <string name="tropa_log_empty">Проверок пока нет: они начинаются, когда VPN включён.</string>
+    <string name="tropa_log_title">Журнал подключения</string>
+    <string name="tropa_log_empty">Журнал пуст. Сюда пишутся проверки, пока VPN включён.</string>
     <string name="tropa_log_latency">задержка</string>
     <string name="tropa_log_download">скачивание</string>
     <string name="tropa_log_direct">интернет без VPN</string>
@@ -159,4 +158,20 @@
     <string name="tropa_geo_subnets_count">%1$d подсетей</string>
     <string name="tropa_geo_not_geoip">не база GeoIP</string>
     <string name="tropa_geo_missing">Файла нет на телефоне</string>
+
+    <!-- 0.5: connection log -->
+    <string name="tropa_log_share">Поделиться журналом</string>
+    <string name="tropa_log_copy">Скопировать журнал</string>
+    <string name="tropa_log_clear">Очистить журнал</string>
+    <string name="tropa_log_clear_confirm">Очистить журнал подключения?</string>
+    <string name="tropa_log_copied">Журнал скопирован</string>
+    <string name="tropa_log_cleared">Журнал очищен</string>
+    <string name="tropa_log_size">Размер: %1$s из %2$s, старые записи удаляются сами</string>
+    <string name="tropa_log_start">VPN включён</string>
+    <string name="tropa_log_stop">VPN выключен</string>
+    <string name="tropa_log_connected">Подключено</string>
+    <string name="tropa_log_no_server">Нет связи с серверами</string>
+    <string name="tropa_log_no_internet">Нет интернета</string>
+    <string name="tropa_settings_log_size">Размер журнала подключения</string>
+    <string name="tropa_settings_log_size_hint">Когда журнал станет больше, самые старые записи удаляются.</string>
 </resources>

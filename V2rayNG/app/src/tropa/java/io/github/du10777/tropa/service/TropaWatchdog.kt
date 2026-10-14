@@ -20,6 +20,7 @@ import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.util.LogUtil
 import io.github.du10777.tropa.data.CheckSettings
+import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.Node
 import io.github.du10777.tropa.data.NodePlan
@@ -80,7 +81,6 @@ object TropaWatchdog {
     private const val NO_INTERNET_RECHECK_MS = 30_000L
     private const val CHECKS_OFF_RECHECK_MS = 60_000L
     private const val ROTATE_PROFILE_AFTER = 2
-    private const val LOG_SIZE = 120
 
     /** A problem report is saved once an outage lasts this many reconnect attempts. */
     private const val REPORT_AFTER_ATTEMPTS = 3
@@ -124,6 +124,7 @@ object TropaWatchdog {
     @Synchronized
     fun stop(context: Context) {
         val app = context.applicationContext
+        if (scope != null) ConnectionLog.append(app, ProbeEvent(System.currentTimeMillis(), "stop", "", null, "", ok = true))
         scope?.cancel()
         scope = null
         unregisterSignals(app)
@@ -194,7 +195,6 @@ object TropaWatchdog {
         private var reportSaved = false
         private val trafficBaseRx = TrafficStats.getUidRxBytes(Process.myUid()).coerceAtLeast(0)
         private val trafficBaseTx = TrafficStats.getUidTxBytes(Process.myUid()).coerceAtLeast(0)
-        private val log = ArrayDeque<ProbeEvent>()
 
         private val direct by lazy {
             OkHttpClient.Builder()
@@ -205,6 +205,7 @@ object TropaWatchdog {
         }
 
         suspend fun run() {
+            record(ProbeEvent(System.currentTimeMillis(), "start", "", null, "", ok = true))
             loadPlan()
             var attempt = 0
             while (currentCoroutineContext().isActive) {
@@ -435,10 +436,7 @@ object TropaWatchdog {
             return result
         }
 
-        private fun record(event: ProbeEvent) = synchronized(log) {
-            log.addLast(event)
-            while (log.size > LOG_SIZE) log.removeFirst()
-        }
+        private fun record(event: ProbeEvent) = ConnectionLog.append(context, event)
 
         /** Direct request outside the tunnel (the app itself is excluded from its VPN). */
         private fun internetUp(): Boolean = CheckSettings.directUrls.any { url ->
@@ -475,6 +473,14 @@ object TropaWatchdog {
                 reportSaved = false
                 scope.launch { ProblemReports.uploadPending(context) }
             }
+            record(
+                ProbeEvent(
+                    System.currentTimeMillis(), "connected",
+                    activeTag?.let { tag -> plan.nodes.firstOrNull { it.tag == tag }?.name }.orEmpty(),
+                    activeTag?.let { tag -> plan.nodes.firstOrNull { it.tag == tag }?.address },
+                    "", ok = true, latencyMs = activeTag?.let { selector.stats(it)?.median() } ?: 0,
+                ),
+            )
             if (lostNotified) TropaNotifier.notifyRestored(context)
             lostNotified = false
             everConnected = true
@@ -491,6 +497,9 @@ object TropaWatchdog {
         }
 
         private fun publish(phase: WatchPhase, attempt: Int = 0, nextRetryAt: Long = 0L) {
+            if (phase != this.phase && (phase == WatchPhase.NO_SERVER || phase == WatchPhase.NO_INTERNET)) {
+                record(ProbeEvent(System.currentTimeMillis(), if (phase == WatchPhase.NO_SERVER) "no_server" else "no_internet", "", null, "", ok = false))
+            }
             this.phase = phase
             WatchStateStore.publish(context, currentState(phase, attempt, nextRetryAt))
         }
@@ -521,7 +530,6 @@ object TropaWatchdog {
                     connectedAt = if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF) connectedAt else 0L,
                     trafficBaseRx = trafficBaseRx,
                     trafficBaseTx = trafficBaseTx,
-                    log = synchronized(log) { log.toList() },
                 )
         }
     }

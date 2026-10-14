@@ -108,7 +108,8 @@ class MainActions(
     val onDeleteActive: () -> Unit = {},
     val onShowDetails: () -> Unit = {},
     val onCloseDetails: () -> Unit = {},
-    val onShareReport: () -> Unit = {},
+    val onShareLog: () -> Unit = {},
+    val onOpenLog: () -> Unit = {},
     val onOpenGeo: (GeoRef) -> Unit = {},
 )
 
@@ -667,10 +668,7 @@ private fun DetailsSheet(details: List<ProfileDetails>, watch: WatchState?, acti
             }
             details.forEach { profile -> ProfileBlock(profile, watch) }
             details.firstOrNull { it.inUse && it.geo.isNotEmpty() }?.let { GeoBlock(it.geo, actions.onOpenGeo) }
-            CheckLog(watch)
-            TextButton(onClick = actions.onShareReport, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text(stringResource(R.string.tropa_report_share))
-            }
+            LogHeader(actions)
         }
     }
 }
@@ -873,54 +871,27 @@ private fun GeoBlock(rules: List<GeoRule>, onOpen: (GeoRef) -> Unit) {
     }
 }
 
-/** What the watchdog tried recently: server, address, result or error. */
+/** Only the head of the connection log: the title opens it, the share icon sends it. */
 @Composable
-private fun CheckLog(watch: WatchState?) {
-    val events = watch?.log.orEmpty()
-    val time = remember { java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT) }
+private fun LogHeader(actions: MainActions) {
     Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.tropa_log_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            if (events.isEmpty()) {
-                Text(stringResource(R.string.tropa_log_empty), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            events.asReversed().take(40).forEach { e ->
-                val kind = when (e.kind) {
-                    "latency" -> R.string.tropa_log_latency
-                    "download" -> R.string.tropa_log_download
-                    "direct" -> R.string.tropa_log_direct
-                    else -> R.string.tropa_log_reload
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(
-                        Modifier
-                            .padding(top = 5.dp)
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (e.ok) TropaColors.Connected else TropaColors.Problem)
-                    )
-                    Column {
-                        Text(
-                            "${time.format(java.util.Date(e.at))} · ${stringResource(kind)}" +
-                                (if (e.server.isNotEmpty()) " · ${e.server}" else ""),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        if (e.target.isNotEmpty()) {
-                            Text(e.target.removePrefix("https://"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        val result = when {
-                            e.kind == "reload" -> ""
-                            e.ok && e.kind == "download" -> stringResource(R.string.tropa_log_ok_bytes, e.latencyMs, Formatter.formatShortFileSize(LocalContext.current, e.bytes))
-                            e.ok -> stringResource(R.string.tropa_value_ms, e.latencyMs)
-                            else -> e.error.orEmpty()
-                        }
-                        if (result.isNotEmpty()) {
-                            Text(result, fontSize = 12.sp, color = if (e.ok) TropaColors.Connected else TropaColors.Problem)
-                        }
-                    }
+        Column(
+            Modifier
+                .clickable(onClick = actions.onOpenLog)
+                .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.tropa_log_title),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = actions.onShareLog) {
+                    Icon(painterResource(R.drawable.ic_share_24dp), contentDescription = stringResource(R.string.tropa_log_share))
                 }
             }
+            Text("…", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

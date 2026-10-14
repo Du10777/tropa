@@ -34,7 +34,7 @@ data class WatchNode(
 /** One check made by the watchdog, for the details screen and problem reports. */
 data class ProbeEvent(
     val at: Long,
-    /** latency | download | direct | reload */
+    /** latency | download | direct | reload | start | stop | connected | no_server | no_internet */
     val kind: String,
     val server: String,
     val address: String?,
@@ -61,8 +61,6 @@ data class WatchState(
     /** Bytes of the app (which carries all VPN traffic) when the session started. */
     val trafficBaseRx: Long = 0L,
     val trafficBaseTx: Long = 0L,
-    /** Recent checks, newest last. */
-    val log: List<ProbeEvent> = emptyList(),
 )
 
 /**

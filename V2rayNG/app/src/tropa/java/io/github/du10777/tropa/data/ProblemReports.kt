@@ -37,7 +37,7 @@ object ProblemReports {
     private fun dir(context: Context) = File(context.filesDir, DIR).apply { mkdirs() }
 
     /** Everything a report holds, without secrets of the subscription itself. */
-    fun build(context: Context, state: WatchState?): Map<String, Any?> {
+    fun build(context: Context, state: WatchState?, withLog: Boolean = true): Map<String, Any?> {
         val connectionId = Connections.activeId()
         val connection = MmkvManager.decodeSubscriptions().firstOrNull { it.guid == connectionId }?.subscription
         return linkedMapOf(
@@ -54,6 +54,7 @@ object ProblemReports {
                 "directUrls" to CheckSettings.directUrls,
             ),
             "state" to state,
+            "log" to if (withLog) ConnectionLog.read(context).takeLast(400) else null,
         )
     }
 
@@ -89,7 +90,7 @@ object ProblemReports {
     /** Human-readable report for sharing in a messenger. */
     fun shareText(context: Context, state: WatchState?): String {
         val time = SimpleDateFormat("dd.MM HH:mm:ss", Locale.ROOT)
-        val info = build(context, null)
+        val info = build(context, null, withLog = false)
         return buildString {
             appendLine("Tropa report ${time.format(Date())}")
             listOf("app", "android", "device", "network", "connection", "subscriptionHost").forEach { key ->
@@ -98,12 +99,9 @@ object ProblemReports {
             if (state != null) {
                 appendLine("phase: ${state.phase}, attempt ${state.attempt}, active: ${state.activeName}")
                 state.nodes.forEach { appendLine("node ${it.name}: alive=${it.alive} latency=${it.latencyMs} active=${it.active}") }
-                appendLine("--- checks (newest last)")
-                state.log.forEach { e ->
-                    val result = if (e.ok) "OK ${e.latencyMs} ms ${e.bytes} B" else "FAIL ${e.error}"
-                    appendLine("${time.format(Date(e.at))} ${e.kind} [${e.server}${e.address?.let { " $it" } ?: ""}] ${e.target} → $result")
-                }
             }
+            appendLine("--- connection log (oldest first)")
+            append(ConnectionLog.text(context))
         }
     }
 

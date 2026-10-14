@@ -11,6 +11,7 @@ import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.data.SubscriptionInfo
 import io.github.du10777.tropa.service.CoreState
 import io.github.du10777.tropa.service.ProbeEvent
+import io.github.du10777.tropa.ui.log.LogEntry
 import io.github.du10777.tropa.service.WatchNode
 import io.github.du10777.tropa.service.WatchPhase
 import io.github.du10777.tropa.service.WatchState
@@ -19,6 +20,8 @@ import io.github.du10777.tropa.ui.main.MainActions
 import io.github.du10777.tropa.ui.main.MainUiState
 import io.github.du10777.tropa.ui.main.TropaMainScreen
 import io.github.du10777.tropa.ui.theme.TropaTheme
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,11 +78,6 @@ class TropaScreenshotTest {
         nextRetryAt = System.currentTimeMillis() + 10_000,
         nodes = nodes,
         connectedAt = System.currentTimeMillis() - 493_000,
-        log = listOf(
-            ProbeEvent(System.currentTimeMillis() - 40_000, "latency", "VLESS · entry.example.org", "entry.example.org:443", "https://www.gstatic.com/generate_204", ok = true, latencyMs = 48),
-            ProbeEvent(System.currentTimeMillis() - 39_000, "latency", "WireGuard · 127.0.0.1", "127.0.0.1:9000", "https://www.gstatic.com/generate_204", ok = false, error = "dial udp 127.0.0.1:9000: connection refused"),
-            ProbeEvent(System.currentTimeMillis() - 38_000, "download", "VLESS · entry.example.org", "entry.example.org:443", "https://speed.cloudflare.com/__down?bytes=65536", ok = true, latencyMs = 310, bytes = 65536),
-        ),
     )
 
     private fun loaded(core: CoreState, clip: Boolean = false, error: String? = null, watch: WatchState? = null) = MainUiState(
@@ -142,6 +140,27 @@ class TropaScreenshotTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun log() = shot("8_log") {
+        val now = System.currentTimeMillis()
+        androidx.compose.material3.Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
+            androidx.compose.foundation.layout.Column(
+                modifier = androidx.compose.ui.Modifier.padding(16.dp),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(
+                    ProbeEvent(now - 2_000, "connected", "VLESS · entry.example.org", "entry.example.org:443", "", ok = true, latencyMs = 48),
+                    ProbeEvent(now - 4_000, "download", "VLESS · entry.example.org", "entry.example.org:443", "https://speed.cloudflare.com/__down?bytes=65536", ok = true, latencyMs = 310, bytes = 65536),
+                    ProbeEvent(now - 5_000, "latency", "WireGuard · 127.0.0.1", "127.0.0.1:9000", "https://www.gstatic.com/generate_204", ok = false, error = "dial udp 127.0.0.1:9000: connection refused"),
+                    ProbeEvent(now - 5_100, "latency", "VLESS · entry.example.org", "entry.example.org:443", "https://www.gstatic.com/generate_204", ok = true, latencyMs = 48),
+                    ProbeEvent(now - 6_000, "start", "", null, "", ok = true),
+                    ProbeEvent(now - 90_000, "stop", "", null, "", ok = true),
+                    ProbeEvent(now - 95_000, "no_server", "", null, "", ok = false),
+                ).forEach { LogEntry(it) }
+            }
+        }
     }
 
     @Test

@@ -143,13 +143,12 @@
     <string name="tropa_traffic_session">This connection: ↓ %1$s  ↑ %2$s</string>
     <string name="tropa_unit_mbps">Mbit/s</string>
     <string name="tropa_unit_kbps">kbit/s</string>
-    <string name="tropa_report_share">Send a report about the checks</string>
     <string name="tropa_geo_routing">Routing</string>
     <string name="tropa_geo_direct">Direct (bypassing VPN):</string>
     <string name="tropa_geo_proxy">Through VPN:</string>
     <string name="tropa_geo_block">Blocked:</string>
-    <string name="tropa_log_title">Check log</string>
-    <string name="tropa_log_empty">No checks yet: they start once the VPN is on.</string>
+    <string name="tropa_log_title">Connection log</string>
+    <string name="tropa_log_empty">The log is empty. Checks are written here while the VPN is on.</string>
     <string name="tropa_log_latency">latency</string>
     <string name="tropa_log_download">download</string>
     <string name="tropa_log_direct">internet without VPN</string>
@@ -160,4 +159,20 @@
     <string name="tropa_geo_subnets_count">%1$d subnets</string>
     <string name="tropa_geo_not_geoip">not a GeoIP database</string>
     <string name="tropa_geo_missing">The file is not on the phone</string>
+
+    <!-- 0.5: connection log -->
+    <string name="tropa_log_share">Share the log</string>
+    <string name="tropa_log_copy">Copy the log</string>
+    <string name="tropa_log_clear">Clear the log</string>
+    <string name="tropa_log_clear_confirm">Clear the connection log?</string>
+    <string name="tropa_log_copied">The log is copied</string>
+    <string name="tropa_log_cleared">The log is cleared</string>
+    <string name="tropa_log_size">Size: %1$s of %2$s, older entries are removed automatically</string>
+    <string name="tropa_log_start">VPN turned on</string>
+    <string name="tropa_log_stop">VPN turned off</string>
+    <string name="tropa_log_connected">Connected</string>
+    <string name="tropa_log_no_server">No connection to the servers</string>
+    <string name="tropa_log_no_internet">No internet</string>
+    <string name="tropa_settings_log_size">Connection log size</string>
+    <string name="tropa_settings_log_size_hint">When the log grows bigger, the oldest entries are removed.</string>
 </resources>
