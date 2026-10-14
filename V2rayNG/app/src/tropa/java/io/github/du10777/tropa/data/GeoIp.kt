@@ -2,6 +2,7 @@ package io.github.du10777.tropa.data
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.v2ray.ang.dto.entities.RulesetItem
 import java.io.File
 import java.net.InetAddress
 
@@ -119,8 +120,22 @@ object GeoIpFile {
     }
 }
 
-/** Where the routing of a config sends some addresses: "direct", "proxy" or "block". */
-data class GeoRule(val target: String, val items: List<String>)
+/**
+ * One routing rule in plain terms, in the order Xray applies them: where it sends traffic
+ * ("direct", "proxy" or "block") and what it matches.
+ */
+data class RouteRule(
+    val target: String,
+    /** geoip:/ext: lists, subnets, domains, geosite: lists. */
+    val addresses: List<String> = emptyList(),
+    /** Android packages ("process" in Xray). */
+    val apps: List<String> = emptyList(),
+    val ports: String? = null,
+    val protocols: List<String> = emptyList(),
+) {
+    /** Matches nothing but the network: everything earlier rules did not take. */
+    val catchAll: Boolean get() = addresses.isEmpty() && apps.isEmpty() && ports == null && protocols.isEmpty()
+}
 
 /** A geoip reference resolved to a file and a code: geoip:ru → geoip.dat/ru, ext:a/b.dat:ru. */
 data class GeoRef(val file: String, val code: String)
@@ -128,31 +143,49 @@ data class GeoRef(val file: String, val code: String)
 object GeoRouting {
     private val DIRECT = setOf("freedom")
     private val BLOCK = setOf("blackhole")
+    private val INTERNAL = setOf("dns")
 
-    /** Address lists (geoip, ext files, subnets, geosite) of the routing rules, grouped by target. */
-    fun rules(configJson: String): List<GeoRule> {
+    /** The routing rules of a JSON config. Internal plumbing (DNS, API inbounds) is left out. */
+    fun rules(configJson: String): List<RouteRule> {
         val root = runCatching { JsonParser.parseString(configJson).asJsonObject }.getOrNull() ?: return emptyList()
         val protocols = root.getAsJsonArray("outbounds")
             ?.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject }
             ?.associate { it.str("tag").orEmpty() to it.str("protocol").orEmpty() }
             .orEmpty()
-        val grouped = LinkedHashMap<String, MutableList<String>>()
-        root.getAsJsonObject("routing")?.getAsJsonArray("rules")?.forEach { element ->
-            val rule = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+        return root.getAsJsonObject("routing")?.getAsJsonArray("rules")?.mapNotNull { element ->
+            val rule = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
             val outbound = rule.str("outboundTag")
+            if (protocols[outbound] in INTERNAL) return@mapNotNull null
             val target = when {
                 rule.str("balancerTag") != null -> "proxy"
                 protocols[outbound] in DIRECT -> "direct"
                 protocols[outbound] in BLOCK -> "block"
                 else -> "proxy"
             }
-            val items = listOf("ip", "domain").flatMap { key ->
-                rule.getAsJsonArray(key)?.mapNotNull { it.takeIf { v -> v.isJsonPrimitive }?.asString }.orEmpty()
-            }
-            if (items.isNotEmpty()) grouped.getOrPut(target) { mutableListOf() }.addAll(items)
-        }
-        return grouped.map { (target, items) -> GeoRule(target, items.distinct()) }
+            val parsed = RouteRule(
+                target = target,
+                addresses = rule.strings("ip") + rule.strings("domain"),
+                apps = rule.strings("process"),
+                ports = rule.str("port"),
+                protocols = rule.strings("protocol"),
+            )
+            // A rule that only picks an inbound is plumbing (API, DNS), not a routing choice.
+            if (parsed.catchAll && rule.has("inboundTag")) null else parsed
+        }.orEmpty()
     }
+
+    /** The upstream routing settings, which apply to servers from share links. */
+    fun fromRulesets(rulesets: List<RulesetItem>?): List<RouteRule> = rulesets.orEmpty()
+        .filter { it.enabled }
+        .map { set ->
+            RouteRule(
+                target = set.outboundTag.ifEmpty { "proxy" },
+                addresses = set.ip.orEmpty() + set.domain.orEmpty(),
+                apps = set.process.orEmpty(),
+                ports = set.port?.takeIf { it.isNotBlank() },
+                protocols = set.protocol.orEmpty(),
+            )
+        }
 
     fun parseRef(item: String): GeoRef? = when {
         item.startsWith("geoip:", ignoreCase = true) -> GeoRef("geoip.dat", item.substringAfter(':'))
@@ -167,4 +200,14 @@ object GeoRouting {
     }
 
     private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString
+
+    /** A string or a list of strings. */
+    private fun JsonObject.strings(key: String): List<String> {
+        val value = get(key) ?: return emptyList()
+        return when {
+            value.isJsonArray -> value.asJsonArray.mapNotNull { it.takeIf { v -> v.isJsonPrimitive }?.asString }
+            value.isJsonPrimitive -> value.asString.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            else -> emptyList()
+        }
+    }
 }

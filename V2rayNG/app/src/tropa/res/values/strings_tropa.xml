@@ -200,4 +200,12 @@
     <string name="tropa_log_screen_on">Screen on</string>
     <string name="tropa_log_screen_off">Screen off</string>
     <string name="tropa_log_core">Xray core</string>
+
+    <!-- 0.6.1: routing block, subnets -->
+    <string name="tropa_route_all_vpn">All traffic goes through the VPN</string>
+    <string name="tropa_route_rest">everything else</string>
+    <string name="tropa_route_apps">apps: %1$s</string>
+    <string name="tropa_route_ports">ports: %1$s</string>
+    <string name="tropa_route_protocols">protocols: %1$s</string>
+    <string name="tropa_geo_select_hint">Touch and hold a subnet to select and copy it</string>
 </resources>

@@ -3,7 +3,7 @@ package io.github.du10777.tropa.ui.main
 import android.text.format.Formatter
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
-import io.github.du10777.tropa.data.GeoRule
+import io.github.du10777.tropa.data.RouteRule
 import io.github.du10777.tropa.data.GeoRouting
 import io.github.du10777.tropa.data.GeoRef
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -670,7 +670,7 @@ private fun DetailsSheet(details: List<ProfileDetails>, watch: WatchState?, acti
                 Text(stringResource(R.string.tropa_details_together), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             details.forEach { profile -> ProfileBlock(profile, watch) }
-            details.firstOrNull { it.inUse && it.geo.isNotEmpty() }?.let { GeoBlock(it.geo, actions.onOpenGeo) }
+            details.firstOrNull { it.inUse }?.let { RoutingBlock(it.routing, actions.onOpenGeo) }
             LogHeader(actions)
         }
     }
@@ -846,33 +846,56 @@ private fun speedText(context: android.content.Context, bytesPerSecond: Long): S
     }
 }
 
-/** Where the routing sends which addresses; geoip lists open as subnet lists. */
+/**
+ * Where the routing sends traffic, rule by rule in the order Xray applies them; geoip lists open
+ * as subnet lists, apps show their names.
+ */
 @Composable
-private fun GeoBlock(rules: List<GeoRule>, onOpen: (GeoRef) -> Unit) {
+private fun RoutingBlock(rules: List<RouteRule>, onOpen: (GeoRef) -> Unit) {
+    val context = LocalContext.current
     Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.tropa_geo_routing), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            if (rules.isEmpty()) {
+                Text(stringResource(R.string.tropa_route_all_vpn), fontSize = 14.sp)
+            }
             rules.forEach { rule ->
-                val title = when (rule.target) {
-                    "direct" -> R.string.tropa_geo_direct
-                    "block" -> R.string.tropa_geo_block
-                    else -> R.string.tropa_geo_proxy
+                val (title, color) = when (rule.target) {
+                    "direct" -> R.string.tropa_geo_direct to TropaColors.Connected
+                    "block" -> R.string.tropa_geo_block to TropaColors.Problem
+                    else -> R.string.tropa_geo_proxy to TropaColors.BrandDark
                 }
-                Text(stringResource(title), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                rule.items.take(30).forEach { item ->
-                    val ref = GeoRouting.parseRef(item)
-                    Text(
-                        item,
-                        fontSize = 14.sp,
-                        color = if (ref != null) TropaColors.Info else MaterialTheme.colorScheme.onSurface,
-                        modifier = if (ref != null) Modifier.clickable { onOpen(ref) } else Modifier,
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(title), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = color)
+                    if (rule.catchAll) Text(stringResource(R.string.tropa_route_rest), fontSize = 14.sp)
+                    if (rule.apps.isNotEmpty()) {
+                        Text(stringResource(R.string.tropa_route_apps, rule.apps.joinToString(", ") { appLabel(context, it) }), fontSize = 14.sp)
+                    }
+                    rule.ports?.let { Text(stringResource(R.string.tropa_route_ports, it), fontSize = 14.sp) }
+                    if (rule.protocols.isNotEmpty()) {
+                        Text(stringResource(R.string.tropa_route_protocols, rule.protocols.joinToString(", ")), fontSize = 14.sp)
+                    }
+                    rule.addresses.take(30).forEach { item ->
+                        val ref = GeoRouting.parseRef(item)
+                        Text(
+                            item,
+                            fontSize = 14.sp,
+                            color = if (ref != null) TropaColors.Info else MaterialTheme.colorScheme.onSurface,
+                            modifier = if (ref != null) Modifier.clickable { onOpen(ref) } else Modifier,
+                        )
+                    }
+                    if (rule.addresses.size > 30) Text("… +${rule.addresses.size - 30}", fontSize = 13.sp)
                 }
-                if (rule.items.size > 30) Text("… +${rule.items.size - 30}", fontSize = 13.sp)
             }
         }
     }
 }
+
+/** "FreeTurn (com.freeturn.app)" when the app is installed, else the package name. */
+private fun appLabel(context: android.content.Context, packageName: String): String = runCatching {
+    val pm = context.packageManager
+    "${pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0))} ($packageName)"
+}.getOrDefault(packageName)
 
 /** Only the head of the connection log: the title opens it, the share icon sends it. */
 @Composable

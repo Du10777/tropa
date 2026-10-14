@@ -1,5 +1,6 @@
 package io.github.du10777.tropa.data
 
+import com.v2ray.ang.dto.entities.RulesetItem
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
@@ -49,18 +50,43 @@ class GeoIpTest {
     }
 
     @Test
-    fun `routing rules are grouped by where they send traffic`() {
+    fun `routing rules keep their order, apps, ports and the catch-all`() {
         val rules = GeoRouting.rules(
-            """{"outbounds":[{"tag":"proxy","protocol":"vless"},{"tag":"direct","protocol":"freedom"},{"tag":"block","protocol":"blackhole"}],
+            """{"outbounds":[{"tag":"proxy","protocol":"vless"},{"tag":"direct","protocol":"freedom"},
+                 {"tag":"block","protocol":"blackhole"},{"tag":"dns-out","protocol":"dns"}],
                "routing":{"rules":[
+                 {"inboundTag":["api"],"outboundTag":"api"},
+                 {"port":53,"outboundTag":"dns-out"},
+                 {"process":["com.freeturn.app"],"outboundTag":"direct"},
                  {"ip":["geoip:private","ext:x2c/geoip-ru.dat:ru","1.2.3.0/24"],"outboundTag":"direct"},
-                 {"domain":["geosite:category-ads"],"outboundTag":"block"},
+                 {"domain":["geosite:category-ads"],"port":"443","outboundTag":"block"},
                  {"network":"tcp,udp","balancerTag":"balancer"}]}}"""
         )
         assertEquals(
             listOf(
-                GeoRule("direct", listOf("geoip:private", "ext:x2c/geoip-ru.dat:ru", "1.2.3.0/24")),
-                GeoRule("block", listOf("geosite:category-ads")),
+                RouteRule("direct", apps = listOf("com.freeturn.app")),
+                RouteRule("direct", addresses = listOf("geoip:private", "ext:x2c/geoip-ru.dat:ru", "1.2.3.0/24")),
+                RouteRule("block", addresses = listOf("geosite:category-ads"), ports = "443"),
+                RouteRule("proxy"),
+            ),
+            rules,
+        )
+        assertEquals(listOf(false, false, false, true), rules.map { it.catchAll })
+    }
+
+    @Test
+    fun `upstream rulesets become rules when enabled`() {
+        val rules = GeoRouting.fromRulesets(
+            listOf(
+                RulesetItem(outboundTag = "direct", ip = listOf("geoip:private"), domain = listOf("geosite:private")),
+                RulesetItem(outboundTag = "block", domain = listOf("geosite:category-ads-all"), enabled = false),
+                RulesetItem(outboundTag = "proxy", port = "0-65535"),
+            )
+        )
+        assertEquals(
+            listOf(
+                RouteRule("direct", addresses = listOf("geoip:private", "geosite:private")),
+                RouteRule("proxy", ports = "0-65535"),
             ),
             rules,
         )

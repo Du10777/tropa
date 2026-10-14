@@ -32,8 +32,8 @@ data class ProfileDetails(
     val inUse: Boolean,
     val balanced: Boolean,
     val nodes: List<Node>,
-    /** Where the routing of this config sends which addresses (geoip, ext files, subnets, domains). */
-    val geo: List<GeoRule> = emptyList(),
+    /** The routing rules of this config, in order (for share links: the upstream routing settings). */
+    val routing: List<RouteRule> = emptyList(),
 )
 
 sealed interface AddResult {
@@ -120,14 +120,20 @@ object Connections {
                     inUse = guid == running,
                     balanced = plan.isBalanced,
                     nodes = plan.proxies,
-                    geo = GeoRouting.rules(MmkvManager.decodeServerRaw(guid).orEmpty()),
+                    routing = GeoRouting.rules(MmkvManager.decodeServerRaw(guid).orEmpty()),
                 )
             } else {
                 val address = listOfNotNull(profile.server, profile.serverPort).joinToString(":").ifEmpty { null }
                 val transport = listOfNotNull(profile.network, profile.security?.takeIf { it.isNotEmpty() && it != "none" })
                     .joinToString(", ").ifEmpty { null }
                 val node = Node(guid, profile.remarks, NodePlanner.displayProtocol(profile.configType.name), address, transport)
-                ProfileDetails(profile.remarks, inUse = guid == running || (groupInUse && profile.configType.isPlainServer()), balanced = false, nodes = listOf(node))
+                ProfileDetails(
+                    profile.remarks,
+                    inUse = guid == running || (groupInUse && profile.configType.isPlainServer()),
+                    balanced = false,
+                    nodes = listOf(node),
+                    routing = GeoRouting.fromRulesets(MmkvManager.decodeRoutingRulesets()),
+                )
             }
         }
     }

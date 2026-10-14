@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -148,14 +149,19 @@ private fun SubnetList(file: File, code: String) {
     Column {
         Search(query) { query = it }
         Text(
-            stringResource(R.string.tropa_geo_subnets_count, list.size),
+            stringResource(R.string.tropa_geo_subnets_count, list.size) + " · " + stringResource(R.string.tropa_geo_select_hint),
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp),
         )
         val shown = if (query.isBlank()) list else list.filter { it.contains(query.trim()) }
-        LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-            items(shown) { subnet -> Text(subnet, fontSize = 15.sp, modifier = Modifier.padding(vertical = 3.dp)) }
+        // Full width, so the list scrolls from the empty space next to the subnets too.
+        SelectionContainer(Modifier.fillMaxSize()) {
+            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                items(shown) { subnet ->
+                    Text(subnet, fontSize = 15.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp))
+                }
+            }
         }
     }
 }

@@ -199,4 +199,12 @@
     <string name="tropa_log_screen_on">Экран включён</string>
     <string name="tropa_log_screen_off">Экран выключен</string>
     <string name="tropa_log_core">Ядро Xray</string>
+
+    <!-- 0.6.1: routing block, subnets -->
+    <string name="tropa_route_all_vpn">Весь трафик идёт через VPN</string>
+    <string name="tropa_route_rest">всё остальное</string>
+    <string name="tropa_route_apps">приложения: %1$s</string>
+    <string name="tropa_route_ports">порты: %1$s</string>
+    <string name="tropa_route_protocols">протоколы: %1$s</string>
+    <string name="tropa_geo_select_hint">Нажмите и удерживайте подсеть, чтобы выделить и скопировать</string>
 </resources>
