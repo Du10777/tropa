@@ -37,13 +37,16 @@ class NodeSelector(
 
     private val stats = LinkedHashMap<String, Stats>()
 
+    @Synchronized
     fun reset(tags: Collection<String>) {
         stats.clear()
         tags.forEach { stats[it] = Stats() }
     }
 
+    @Synchronized
     fun stats(tag: String): Stats? = stats[tag]
 
+    @Synchronized
     fun record(tag: String, ok: Boolean, latencyMs: Long?) {
         val s = stats.getOrPut(tag) { Stats() }
         s.checks++
@@ -56,14 +59,17 @@ class NodeSelector(
         }
     }
 
+    @Synchronized
     fun isActiveDead(active: String): Boolean = (stats[active]?.consecutiveFails ?: 0) >= failThreshold
 
     /** Best server that answered its last check, lowest median latency first. */
+    @Synchronized
     fun bestAlive(except: String? = null): String? =
         stats.filter { (tag, s) -> tag != except && s.alive }
             .minByOrNull { (_, s) -> s.median() ?: Long.MAX_VALUE }
             ?.key
 
+    @Synchronized
     fun evaluate(active: String): Decision {
         if (isActiveDead(active)) {
             return bestAlive(except = active)?.let { Decision.SwitchTo(it, Reason.ACTIVE_DEAD) } ?: Decision.AllDead

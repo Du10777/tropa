@@ -78,6 +78,12 @@ object TropaWatchdog {
     private const val CHECKS_OFF_RECHECK_MS = 60_000L
     private const val ROTATE_PROFILE_AFTER = 2
 
+    /** Servers answering within this time after the first one are compared, the best one wins. */
+    private const val FIRST_ANSWER_WINDOW_MS = 1_000L
+
+    /** After connecting, the remaining servers get this long to answer, then count as down for now. */
+    private const val BACKGROUND_ANSWER_MS = 3_000L
+
     private var scope: CoroutineScope? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
@@ -104,7 +110,7 @@ object TropaWatchdog {
         scope?.cancel()
         screenOn = app.getSystemService(PowerManager::class.java)?.isInteractive != false
         registerSignals(app)
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { it.launch { Session(app).run() } }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { session -> session.launch { Session(app, session).run() } }
         LogUtil.i(TAG, "started")
     }
 
@@ -165,7 +171,7 @@ object TropaWatchdog {
     )
 
     /** One watch session: from the core start until it stops. */
-    private class Session(private val context: Context) {
+    private class Session(private val context: Context, private val scope: CoroutineScope) {
         private val gson = Gson()
         private val selector = NodeSelector()
         private var plan = NodePlan(null, emptyList())
@@ -176,6 +182,7 @@ object TropaWatchdog {
         private var lastThroughputAt = 0L
         private var everConnected = false
         private var lostNotified = false
+        private var phase = WatchPhase.CHECKING
 
         private val direct by lazy {
             OkHttpClient.Builder()
@@ -232,21 +239,61 @@ object TropaWatchdog {
             lastThroughputAt = 0L
         }
 
-        /** Checks all servers, picks the best live one that also passes the download test. */
+        /**
+         * Checks all servers at once and connects through the first one that answers: servers that
+         * answer within [FIRST_ANSWER_WINDOW_MS] of it are compared and the fastest wins, and the
+         * winner must also pass the download test. The rest keep being checked in the background
+         * for [BACKGROUND_ANSWER_MS] more, so the details screen and failover see them too.
+         */
         private suspend fun establish(): Boolean {
-            probeAll(plan.nodes.map { it.tag })
-            val candidates = plan.nodes.map { it.tag }
-                .filter { selector.stats(it)?.alive == true }
-                .sortedBy { selector.stats(it)?.median() ?: Long.MAX_VALUE }
-            for (tag in candidates) {
-                select(tag)
-                if (throughputOk(tag)) {
-                    lastThroughputAt = System.currentTimeMillis()
-                    return true
-                }
-                selector.record(tag, ok = false, latencyMs = null)
+            val tags = plan.nodes.map { it.tag }
+            val answers = Channel<Pair<String, ProbeResult>>(Channel.UNLIMITED)
+            val probes = tags.associateWith { tag -> scope.async { probeLatency(tag).also { answers.trySend(tag to it) } } }
+            val answered = LinkedHashMap<String, ProbeResult>()
+            var firstOkAt = 0L
+            while (answered.size < tags.size) {
+                val waitMs = if (firstOkAt == 0L) Long.MAX_VALUE else firstOkAt + FIRST_ANSWER_WINDOW_MS - System.currentTimeMillis()
+                if (waitMs <= 0) break
+                val (tag, result) = withTimeoutOrNull(waitMs) { answers.receive() } ?: break
+                answered[tag] = result
+                selector.record(tag, result.ok, result.latencyMs.takeIf { result.ok })
+                if (result.ok && firstOkAt == 0L) firstOkAt = System.currentTimeMillis()
+            }
+
+            val pending = probes.filterKeys { it !in answered }
+            val winner = answered.filterValues { it.ok }.entries.sortedBy { it.value.latencyMs }.map { it.key }
+                .firstOrNull { tag -> passesDownload(tag) }
+            if (winner != null) {
+                if (pending.isNotEmpty()) scope.launch { finishInBackground(pending) }
+                return true
+            }
+
+            // Nobody in the window passed: give the late ones their full time, then try them.
+            pending.forEach { (tag, probe) ->
+                val result = probe.await()
+                selector.record(tag, result.ok, result.latencyMs.takeIf { result.ok })
+                if (result.ok && passesDownload(tag)) return true
             }
             return false
+        }
+
+        private fun passesDownload(tag: String): Boolean {
+            select(tag)
+            if (throughputOk(tag)) {
+                lastThroughputAt = System.currentTimeMillis()
+                return true
+            }
+            selector.record(tag, ok = false, latencyMs = null)
+            return false
+        }
+
+        private suspend fun finishInBackground(pending: Map<String, kotlinx.coroutines.Deferred<ProbeResult>>) {
+            val deadline = System.currentTimeMillis() + BACKGROUND_ANSWER_MS
+            pending.forEach { (tag, probe) ->
+                val result = withTimeoutOrNull((deadline - System.currentTimeMillis()).coerceAtLeast(1)) { probe.await() }
+                selector.record(tag, result?.ok == true, result?.latencyMs?.takeIf { result.ok })
+            }
+            if (phase == WatchPhase.CONNECTED) publish(WatchPhase.CONNECTED)
         }
 
         /** Watches the active server while things work; returns when every server is dead. */
@@ -384,6 +431,7 @@ object TropaWatchdog {
         }
 
         private fun publish(phase: WatchPhase, attempt: Int = 0, nextRetryAt: Long = 0L) {
+            this.phase = phase
             val vpn = CoreServiceManager.serviceControl?.get()?.getService() as? VpnService
             val q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
             val nodes = plan.nodes.filter { it.tag.isNotEmpty() }.map { node ->

@@ -470,11 +470,18 @@ private fun ConnectionCard(connection: Connection, state: MainUiState, actions: 
                     Text(cardSubtitle(connection), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.width(12.dp))
+                // Like OpenVPN Connect: the switch is inactive while connecting and checking.
+                val connecting = statusLook(state) == StatusLook.PROGRESS
                 Switch(
                     checked = switchOn,
                     onCheckedChange = actions.onToggle,
-                    enabled = !state.busy,
-                    colors = SwitchDefaults.colors(checkedTrackColor = accent, checkedThumbColor = Color.White),
+                    enabled = !state.busy && !connecting,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = accent,
+                        checkedThumbColor = Color.White,
+                        disabledCheckedTrackColor = accent.copy(alpha = 0.38f),
+                        disabledCheckedThumbColor = Color.White,
+                    ),
                     modifier = Modifier.scale(1.3f),
                 )
                 Spacer(Modifier.width(6.dp))
