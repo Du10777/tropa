@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /** Starts and stops the watchdog together with the core (runs in the VPN service process). */
@@ -90,6 +91,9 @@ object TropaWatchdog {
 
     /** After connecting, the remaining servers get this long to answer, then count as down for now. */
     private const val BACKGROUND_ANSWER_MS = 3_000L
+
+    /** While connected, a server check with the same outcome as before is logged once in this time. */
+    private const val QUIET_LOG_MS = 10 * 60_000L
 
     private var scope: CoroutineScope? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -193,6 +197,8 @@ object TropaWatchdog {
         private var phase = WatchPhase.CHECKING
         private var connectedAt = 0L
         private var reportSaved = false
+        /** Outcome and time of the last logged check per server, to keep steady periods short in the log. */
+        private val lastLogged = ConcurrentHashMap<String, Pair<Boolean, Long>>()
         private val trafficBaseRx = TrafficStats.getUidRxBytes(Process.myUid()).coerceAtLeast(0)
         private val trafficBaseTx = TrafficStats.getUidTxBytes(Process.myUid()).coerceAtLeast(0)
 
@@ -348,6 +354,7 @@ object TropaWatchdog {
                     NodeSelector.Decision.Keep -> publish(WatchPhase.CONNECTED)
                     is NodeSelector.Decision.SwitchTo -> {
                         LogUtil.i(TAG, "switching new connections to ${decision.tag} (${decision.reason})")
+                        record(event(decision.tag, "switch", "", ok = true, ProbeResult(ok = true), error = null))
                         select(decision.tag)
                         publish(WatchPhase.CONNECTED)
                     }
@@ -391,49 +398,72 @@ object TropaWatchdog {
         /**
          * A server is alive when any of the latency addresses answers through it. All addresses are
          * asked at once and the first success counts; the others finish in the background.
+         * The log gets one line per server: the address that answered, or the errors of all of them.
          */
         private suspend fun probeLatency(tag: String): ProbeResult {
             val urls = CheckSettings.latencyUrls
             if (urls.isEmpty()) return ProbeResult(error = "no addresses")
-            val answers = Channel<ProbeResult>(Channel.UNLIMITED)
-            urls.forEach { url -> scope.launch { answers.trySend(probe(tag, url, LATENCY_TIMEOUT_MS, LATENCY_MAX_BYTES, "latency")) } }
+            val answers = Channel<Pair<String, ProbeResult>>(Channel.UNLIMITED)
+            urls.forEach { url -> scope.launch { answers.trySend(url to probe(tag, url, LATENCY_TIMEOUT_MS, LATENCY_MAX_BYTES)) } }
+            val errors = LinkedHashMap<String, String>()
             var last = ProbeResult(error = "no answer")
             repeat(urls.size) {
-                last = answers.receive()
-                if (last.ok) return last
+                val (url, result) = answers.receive()
+                last = result
+                if (result.ok) {
+                    recordCheck(tag, event(tag, "latency", url, ok = true, result))
+                    return result
+                }
+                errors[url] = result.error ?: "error"
             }
+            val details = errors.entries.joinToString("; ") { (url, error) -> "${hostOf(url)}: ${shortError(error)}" }
+            recordCheck(tag, event(tag, "latency", "", ok = false, last, error = details))
             return last
+        }
+
+        private fun hostOf(url: String): String = runCatching { java.net.URI(url).host }.getOrNull() ?: url
+
+        /** Go errors repeat the address (`Get "https://…": context deadline exceeded`); the reason is enough. */
+        private fun shortError(error: String): String = error.substringAfterLast("\": ").removePrefix("net/http: ")
+
+        /** While connected, a check that ends like the previous one is logged once in [QUIET_LOG_MS]. */
+        private fun recordCheck(tag: String, event: ProbeEvent) {
+            val previous = lastLogged[tag]
+            val unchanged = previous != null && previous.first == event.ok && event.at - previous.second < QUIET_LOG_MS
+            if (phase == WatchPhase.CONNECTED && unchanged) return
+            lastLogged[tag] = event.ok to event.at
+            record(event)
         }
 
         /** At least 64 KB must come through: catches channels that stall after ~16 KB. */
         private fun throughputOk(tag: String): Boolean =
             CheckSettings.throughputUrls.any { url ->
-                val result = probe(tag, url, THROUGHPUT_TIMEOUT_MS, THROUGHPUT_MAX_BYTES, "download")
-                result.ok && result.bytes >= CheckSettings.THROUGHPUT_MIN_BYTES
+                val result = probe(tag, url, THROUGHPUT_TIMEOUT_MS, THROUGHPUT_MAX_BYTES)
+                val ok = result.ok && result.bytes >= CheckSettings.THROUGHPUT_MIN_BYTES
+                record(event(tag, "download", url, ok, result, error = result.error ?: if (!ok) "only ${result.bytes} bytes" else null))
+                ok
             }
 
-        private fun probe(tag: String, url: String, timeoutMs: Long, maxBytes: Long, kind: String): ProbeResult {
-            val result = try {
-                val json = CoreServiceManager.coreController.tropaProbe(tag, url, timeoutMs, maxBytes)
-                gson.fromJson(json, ProbeResult::class.java) ?: ProbeResult(error = "empty result")
-            } catch (e: Exception) {
-                ProbeResult(error = e.message ?: e.javaClass.simpleName)
-            }
+        private fun probe(tag: String, url: String, timeoutMs: Long, maxBytes: Long): ProbeResult = try {
+            val json = CoreServiceManager.coreController.tropaProbe(tag, url, timeoutMs, maxBytes)
+            gson.fromJson(json, ProbeResult::class.java) ?: ProbeResult(error = "empty result")
+        } catch (e: Exception) {
+            ProbeResult(error = e.message ?: e.javaClass.simpleName)
+        }
+
+        private fun event(tag: String, kind: String, target: String, ok: Boolean, result: ProbeResult, error: String? = result.error): ProbeEvent {
             val node = plan.nodes.firstOrNull { it.tag == tag }
-            record(
-                ProbeEvent(
-                    at = System.currentTimeMillis(),
-                    kind = kind,
-                    server = node?.name?.takeIf { it.isNotEmpty() } ?: tag,
-                    address = node?.address,
-                    target = url,
-                    ok = result.ok && (kind != "download" || result.bytes >= CheckSettings.THROUGHPUT_MIN_BYTES),
-                    latencyMs = result.latencyMs,
-                    bytes = result.bytes,
-                    error = result.error ?: if (kind == "download" && result.bytes < CheckSettings.THROUGHPUT_MIN_BYTES) "only ${result.bytes} bytes" else null,
-                ),
+            return ProbeEvent(
+                at = System.currentTimeMillis(),
+                kind = kind,
+                server = node?.name?.takeIf { it.isNotEmpty() } ?: tag,
+                address = node?.address,
+                target = target,
+                ok = ok,
+                latencyMs = result.latencyMs,
+                bytes = result.bytes,
+                error = error,
             )
-            return result
         }
 
         private fun record(event: ProbeEvent) = ConnectionLog.append(context, event)

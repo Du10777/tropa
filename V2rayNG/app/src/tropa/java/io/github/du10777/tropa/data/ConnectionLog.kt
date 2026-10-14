@@ -7,9 +7,11 @@ import com.v2ray.ang.handler.MmkvManager
 import io.github.du10777.tropa.service.ProbeEvent
 import java.io.File
 import java.io.RandomAccessFile
+import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToLong
 
 /**
  * Connection log: every check, reconnect and session start/stop, one JSON line per event.
@@ -78,6 +80,13 @@ object ConnectionLog {
         }
     }.getOrDefault(emptyList())
 
+    /** Sizes in the binary units the limits are set in: 47 KB, 1 MB, 1.5 MB. */
+    fun sizeLabel(context: Context, bytes: Long): String {
+        val kb = bytes / 1024.0
+        return if (kb < 1024) context.getString(R.string.tropa_size_kb, kb.roundToLong().toString())
+        else context.getString(R.string.tropa_size_mb, DecimalFormat("0.#").format(kb / 1024))
+    }
+
     /** Size and modification time, to notice new entries without reading the file. */
     fun stamp(context: Context): Pair<Long, Long> = file(context).let { f ->
         if (f.exists()) f.length() to f.lastModified() else 0L to 0L
@@ -107,7 +116,7 @@ object ConnectionLog {
     }
 
     /** Events that mark sessions rather than checks. */
-    val SESSION_KINDS = setOf("start", "stop", "connected", "no_server", "no_internet", "reload")
+    val SESSION_KINDS = setOf("start", "stop", "connected", "no_server", "no_internet", "reload", "switch")
 
     fun kindLabel(context: Context, kind: String): String = context.getString(
         when (kind) {
@@ -119,6 +128,7 @@ object ConnectionLog {
             "connected" -> R.string.tropa_log_connected
             "no_server" -> R.string.tropa_log_no_server
             "no_internet" -> R.string.tropa_log_no_internet
+            "switch" -> R.string.tropa_log_switch
             else -> R.string.tropa_log_reload
         }
     )

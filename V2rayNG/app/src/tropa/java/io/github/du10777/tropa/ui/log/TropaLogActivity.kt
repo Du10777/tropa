@@ -43,6 +43,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -147,8 +148,10 @@ class TropaLogActivity : BaseComponentActivity() {
                         }
                         Text(
                             stringResource(R.string.tropa_log_title),
-                            fontSize = 21.sp,
+                            fontSize = 19.sp,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
                         IconButton(onClick = { LogActions.copy(context) }) {
@@ -164,8 +167,8 @@ class TropaLogActivity : BaseComponentActivity() {
                     Text(
                         stringResource(
                             R.string.tropa_log_size,
-                            Formatter.formatShortFileSize(context, size),
-                            Formatter.formatShortFileSize(context, ConnectionLog.limitKb * 1024L),
+                            ConnectionLog.sizeLabel(context, size),
+                            ConnectionLog.sizeLabel(context, ConnectionLog.limitKb * 1024L),
                         ),
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -208,6 +211,7 @@ fun LogEntry(e: ProbeEvent) {
     if (e.kind in ConnectionLog.SESSION_KINDS) {
         val color = when (e.kind) {
             "connected", "start" -> TropaColors.Connected
+            "switch" -> TropaColors.BrandDark
             "stop", "reload" -> TropaColors.Idle
             else -> TropaColors.Problem
         }

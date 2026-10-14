@@ -172,6 +172,9 @@
     <string name="tropa_log_connected">Подключено</string>
     <string name="tropa_log_no_server">Нет связи с серверами</string>
     <string name="tropa_log_no_internet">Нет интернета</string>
+    <string name="tropa_log_switch">Новые соединения через</string>
+    <string name="tropa_size_kb">%1$s КБ</string>
+    <string name="tropa_size_mb">%1$s МБ</string>
     <string name="tropa_settings_log_size">Размер журнала подключения</string>
     <string name="tropa_settings_log_size_hint">Когда журнал станет больше, самые старые записи удаляются.</string>
 </resources>

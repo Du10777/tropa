@@ -50,7 +50,6 @@ import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.main.MainActivity
 import com.v2ray.ang.ui.perappproxy.PerAppProxyActivity
 import com.v2ray.ang.util.Utils
-import android.text.format.Formatter
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.ui.log.TropaLogActivity
@@ -100,7 +99,7 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         SettingsRow(
                             R.drawable.ic_logcat_24dp,
                             stringResource(R.string.tropa_settings_log_size),
-                            Formatter.formatShortFileSize(this@TropaSettingsActivity, logLimit * 1024L),
+                            ConnectionLog.sizeLabel(this@TropaSettingsActivity, logLimit * 1024L),
                         ) { choosingLogSize = true }
                         SettingsRow(R.drawable.ic_routing_24dp, stringResource(R.string.tropa_settings_geo), null) {
                             startActivity(TropaGeoActivity.intent(this@TropaSettingsActivity))
@@ -152,7 +151,7 @@ class TropaSettingsActivity : BaseComponentActivity() {
                                 ) {
                                     RadioButton(selected = kb == logLimit, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TropaColors.Brand))
                                     Text(
-                                        Formatter.formatShortFileSize(this@TropaSettingsActivity, kb * 1024L),
+                                        ConnectionLog.sizeLabel(this@TropaSettingsActivity, kb * 1024L),
                                         fontSize = 16.sp,
                                         modifier = Modifier.padding(start = 12.dp),
                                     )

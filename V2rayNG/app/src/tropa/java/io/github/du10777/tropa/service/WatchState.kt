@@ -34,7 +34,7 @@ data class WatchNode(
 /** One check made by the watchdog, for the details screen and problem reports. */
 data class ProbeEvent(
     val at: Long,
-    /** latency | download | direct | reload | start | stop | connected | no_server | no_internet */
+    /** latency | download | direct | reload | start | stop | connected | no_server | no_internet | switch */
     val kind: String,
     val server: String,
     val address: String?,

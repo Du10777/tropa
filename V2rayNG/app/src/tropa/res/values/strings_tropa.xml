@@ -173,6 +173,9 @@
     <string name="tropa_log_connected">Connected</string>
     <string name="tropa_log_no_server">No connection to the servers</string>
     <string name="tropa_log_no_internet">No internet</string>
+    <string name="tropa_log_switch">New connections go through</string>
+    <string name="tropa_size_kb">%1$s KB</string>
+    <string name="tropa_size_mb">%1$s MB</string>
     <string name="tropa_settings_log_size">Connection log size</string>
     <string name="tropa_settings_log_size_hint">When the log grows bigger, the oldest entries are removed.</string>
 </resources>

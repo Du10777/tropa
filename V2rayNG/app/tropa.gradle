@@ -4,7 +4,7 @@
 // `apply(from = "tropa.gradle")` hook at the end of build.gradle.kts. Because it is applied last,
 // this script runs after the upstream configuration and may override it.
 
-def tropaVersionName = '0.5.0'
+def tropaVersionName = '0.5.1'
 def upstreamVersionName = android.defaultConfig.versionName
 
 def versionParts = tropaVersionName.tokenize('.').collect { it as int }
