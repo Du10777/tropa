@@ -15,6 +15,7 @@ object TropaPrefs {
     private const val PERMISSION_ASKED = "tropa_permission_asked_"
     private const val PERMISSION_BLOCKED = "tropa_permission_blocked_"
     private const val SUBSCRIPTION_INFO = "tropa_subscription_info_"
+    private const val REPORT_URL = "tropa_report_url_"
 
     var localeInitialized: Boolean
         get() = MmkvManager.decodeSettingsBool(LOCALE_INITIALIZED, false)
@@ -65,6 +66,14 @@ object TropaPrefs {
     /** Raw `Subscription-Userinfo` header of a connection, as received on its last download. */
     fun subscriptionInfo(connectionId: String): String? =
         MmkvManager.decodeSettingsString(SUBSCRIPTION_INFO + connectionId)?.takeIf { it.isNotEmpty() }
+
+    /** Where problem reports of a connection go (`Tropa-Report-Url` subscription header). */
+    fun reportUrl(connectionId: String): String? =
+        MmkvManager.decodeSettingsString(REPORT_URL + connectionId)?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+
+    fun setReportUrl(connectionId: String, value: String?) {
+        MmkvManager.encodeSettings(REPORT_URL + connectionId, value.orEmpty())
+    }
 
     fun setSubscriptionInfo(connectionId: String, value: String?) {
         MmkvManager.encodeSettings(SUBSCRIPTION_INFO + connectionId, value.orEmpty())

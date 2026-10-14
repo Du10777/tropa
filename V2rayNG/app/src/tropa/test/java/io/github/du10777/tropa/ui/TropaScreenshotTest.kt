@@ -10,6 +10,7 @@ import io.github.du10777.tropa.data.Node
 import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.data.SubscriptionInfo
 import io.github.du10777.tropa.service.CoreState
+import io.github.du10777.tropa.service.ProbeEvent
 import io.github.du10777.tropa.service.WatchNode
 import io.github.du10777.tropa.service.WatchPhase
 import io.github.du10777.tropa.service.WatchState
@@ -73,6 +74,12 @@ class TropaScreenshotTest {
         attempt = 3,
         nextRetryAt = System.currentTimeMillis() + 10_000,
         nodes = nodes,
+        connectedAt = System.currentTimeMillis() - 493_000,
+        log = listOf(
+            ProbeEvent(System.currentTimeMillis() - 40_000, "latency", "VLESS · entry.example.org", "entry.example.org:443", "https://www.gstatic.com/generate_204", ok = true, latencyMs = 48),
+            ProbeEvent(System.currentTimeMillis() - 39_000, "latency", "WireGuard · 127.0.0.1", "127.0.0.1:9000", "https://www.gstatic.com/generate_204", ok = false, error = "dial udp 127.0.0.1:9000: connection refused"),
+            ProbeEvent(System.currentTimeMillis() - 38_000, "download", "VLESS · entry.example.org", "entry.example.org:443", "https://speed.cloudflare.com/__down?bytes=65536", ok = true, latencyMs = 310, bytes = 65536),
+        ),
     )
 
     private fun loaded(core: CoreState, clip: Boolean = false, error: String? = null, watch: WatchState? = null) = MainUiState(
@@ -117,6 +124,7 @@ class TropaScreenshotTest {
     }
 
     @Test
+    @Config(qualifiers = "ru-w380dp-h1700dp-xxhdpi")
     fun details() = shot("7_details") {
         TropaMainScreen(
             loaded(CoreState.Running, watch = watch(WatchPhase.CONNECTED)),

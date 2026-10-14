@@ -32,6 +32,8 @@ data class ProfileDetails(
     val inUse: Boolean,
     val balanced: Boolean,
     val nodes: List<Node>,
+    /** Where the routing of this config sends which addresses (geoip, ext files, subnets, domains). */
+    val geo: List<GeoRule> = emptyList(),
 )
 
 sealed interface AddResult {
@@ -113,7 +115,13 @@ object Connections {
             val profile = MmkvManager.decodeServerConfig(guid) ?: return@mapNotNull null
             if (profile.configType == EConfigType.CUSTOM) {
                 val plan = planOf(guid, profile)
-                ProfileDetails(profile.remarks, inUse = guid == running, balanced = plan.isBalanced, nodes = plan.proxies)
+                ProfileDetails(
+                    profile.remarks,
+                    inUse = guid == running,
+                    balanced = plan.isBalanced,
+                    nodes = plan.proxies,
+                    geo = GeoRouting.rules(MmkvManager.decodeServerRaw(guid).orEmpty()),
+                )
             } else {
                 val address = listOfNotNull(profile.server, profile.serverPort).joinToString(":").ifEmpty { null }
                 val transport = listOfNotNull(profile.network, profile.security?.takeIf { it.isNotEmpty() && it != "none" })
@@ -179,6 +187,7 @@ object Connections {
         item.lastUpdated = System.currentTimeMillis()
         MmkvManager.encodeSubscription(id, item)
         TropaPrefs.setSubscriptionInfo(id, fetched.headers["subscription-userinfo"])
+        TropaPrefs.setReportUrl(id, fetched.headers["tropa-report-url"])
         SubscriptionUpdater.syncOne(subId = id)
         return AddResult.Added(id)
     }
@@ -218,6 +227,7 @@ object Connections {
         fetched.headers["profile-update-interval"]?.let { item.updateInterval = updateIntervalMinutes(it) }
         MmkvManager.encodeSubscription(id, item)
         TropaPrefs.setSubscriptionInfo(id, fetched.headers["subscription-userinfo"])
+        TropaPrefs.setReportUrl(id, fetched.headers["tropa-report-url"])
         return true
     }
 

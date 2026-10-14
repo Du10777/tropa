@@ -31,6 +31,20 @@ data class WatchNode(
     val active: Boolean,
 )
 
+/** One check made by the watchdog, for the details screen and problem reports. */
+data class ProbeEvent(
+    val at: Long,
+    /** latency | download | direct | reload */
+    val kind: String,
+    val server: String,
+    val address: String?,
+    val target: String,
+    val ok: Boolean,
+    val latencyMs: Long = 0,
+    val bytes: Long = 0,
+    val error: String? = null,
+)
+
 data class WatchState(
     val phase: WatchPhase,
     val activeName: String? = null,
@@ -42,6 +56,13 @@ data class WatchState(
     /** System "always-on VPN" and "block connections without VPN" (Android 10+, null if unknown). */
     val alwaysOn: Boolean? = null,
     val lockdown: Boolean? = null,
+    /** When the channel was confirmed this time (0 while there is no connection). */
+    val connectedAt: Long = 0L,
+    /** Bytes of the app (which carries all VPN traffic) when the session started. */
+    val trafficBaseRx: Long = 0L,
+    val trafficBaseTx: Long = 0L,
+    /** Recent checks, newest last. */
+    val log: List<ProbeEvent> = emptyList(),
 )
 
 /**

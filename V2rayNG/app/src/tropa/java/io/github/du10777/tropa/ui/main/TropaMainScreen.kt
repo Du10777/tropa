@@ -3,6 +3,13 @@ package io.github.du10777.tropa.ui.main
 import android.text.format.Formatter
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
+import io.github.du10777.tropa.data.GeoRule
+import io.github.du10777.tropa.data.GeoRouting
+import io.github.du10777.tropa.data.GeoRef
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Path
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.border
@@ -101,6 +108,8 @@ class MainActions(
     val onDeleteActive: () -> Unit = {},
     val onShowDetails: () -> Unit = {},
     val onCloseDetails: () -> Unit = {},
+    val onShareReport: () -> Unit = {},
+    val onOpenGeo: (GeoRef) -> Unit = {},
 )
 
 /**
@@ -144,7 +153,7 @@ fun TropaMainScreen(
         }
     }
     if (showAddSheet) AddConnectionSheet(actions)
-    if (details != null) DetailsSheet(details, state.watch, actions.onCloseDetails)
+    if (details != null) DetailsSheet(details, state.watch, actions)
 }
 
 @Composable
@@ -213,8 +222,13 @@ private fun AddActions(actions: MainActions, container: Color = MaterialTheme.co
 @Composable
 private fun ConnectionContent(state: MainUiState, actions: MainActions) {
     if (state.clipOffer != null) ClipboardBanner(actions)
-    if (state.core == CoreState.Running) OnlineStats(state.connectedSince, state.watch)
-    StatusBlock(state)
+    val online = state.core == CoreState.Running &&
+        (state.watch?.phase == WatchPhase.CONNECTED || state.watch?.phase == WatchPhase.CHECKS_OFF)
+    if (online) {
+        OnlineStats(state.watch?.connectedAt?.takeIf { it > 0 } ?: state.connectedSince, state.watch)
+        TrafficCard(state.watch)
+    }
+    StatusBlock(state, onClick = if (state.active != null) actions.onShowDetails else null)
     state.active?.let { ConnectionCard(it, state, actions) }
 }
 
@@ -329,7 +343,7 @@ private fun containerOf(look: StatusLook): Color = when (look) {
 }
 
 @Composable
-private fun StatusBlock(state: MainUiState) {
+private fun StatusBlock(state: MainUiState, onClick: (() -> Unit)? = null) {
     val look = statusLook(state)
     val accent = accentOf(look)
     val watch = state.watch
@@ -383,7 +397,14 @@ private fun StatusBlock(state: MainUiState) {
             }
         }
     }
-    Surface(shape = RoundedCornerShape(18.dp), color = containerOf(look), modifier = Modifier.fillMaxWidth()) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = containerOf(look),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+    ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -482,7 +503,7 @@ private fun ConnectionCard(connection: Connection, state: MainUiState, actions: 
                 // Like OpenVPN Connect: while connecting and checking the switch turns into an
                 // outlined pill with a spinner and cannot be tapped.
                 if (statusLook(state) == StatusLook.PROGRESS) {
-                    ConnectingSwitch(TropaColors.Checking)
+                    ConnectingSwitch(TropaColors.Checking, onCancel = { actions.onToggle(false) })
                 } else {
                     Switch(
                         checked = switchOn,
@@ -595,7 +616,11 @@ private fun BottomItem(@DrawableRes icon: Int, label: String, onClick: () -> Uni
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddConnectionSheet(actions: MainActions) {
-    ModalBottomSheet(onDismissRequest = actions.onCloseAddSheet, containerColor = MaterialTheme.colorScheme.surface) {
+    ModalBottomSheet(
+        onDismissRequest = actions.onCloseAddSheet,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
         Column(
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -616,8 +641,12 @@ private fun AddConnectionSheet(actions: MainActions) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DetailsSheet(details: List<ProfileDetails>, watch: WatchState?, onClose: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onClose, containerColor = MaterialTheme.colorScheme.surface) {
+private fun DetailsSheet(details: List<ProfileDetails>, watch: WatchState?, actions: MainActions) {
+    ModalBottomSheet(
+        onDismissRequest = actions.onCloseDetails,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
         Column(
             modifier = Modifier
                 .verticalScroll(rememberScrollState())
@@ -637,6 +666,11 @@ private fun DetailsSheet(details: List<ProfileDetails>, watch: WatchState?, onCl
                 Text(stringResource(R.string.tropa_details_together), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             details.forEach { profile -> ProfileBlock(profile, watch) }
+            details.firstOrNull { it.inUse && it.geo.isNotEmpty() }?.let { GeoBlock(it.geo, actions.onOpenGeo) }
+            CheckLog(watch)
+            TextButton(onClick = actions.onShareReport, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Text(stringResource(R.string.tropa_report_share))
+            }
         }
     }
 }
@@ -700,7 +734,7 @@ private fun ProfileBlock(profile: ProfileDetails, watch: WatchState?) {
 
 /** Inactive switch shown while connecting: outlined pill and rotating dots where the thumb would be. */
 @Composable
-private fun ConnectingSwitch(color: Color) {
+private fun ConnectingSwitch(color: Color, onCancel: () -> Unit) {
     val rotation by rememberInfiniteTransition(label = "connecting").animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -710,6 +744,8 @@ private fun ConnectingSwitch(color: Color) {
     Box(
         modifier = Modifier
             .size(width = 68.dp, height = 42.dp)
+            .clip(RoundedCornerShape(21.dp))
+            .clickable(onClick = onCancel)
             .border(3.dp, color, RoundedCornerShape(21.dp)),
         contentAlignment = Alignment.CenterEnd,
     ) {
@@ -728,6 +764,162 @@ private fun ConnectingSwitch(color: Color) {
                     radius = 2.6.dp.toPx(),
                     center = Offset(center.x + radius * kotlin.math.cos(angle).toFloat(), center.y + radius * kotlin.math.sin(angle).toFloat()),
                 )
+            }
+        }
+    }
+}
+
+/** Speed now, a one-minute chart and the amount of this session (all VPN traffic is the app's). */
+@Composable
+private fun TrafficCard(watch: WatchState?) {
+    val context = LocalContext.current
+    val uid = remember { android.os.Process.myUid() }
+    val history = remember { mutableStateListOf<Pair<Long, Long>>() }
+    var totals by remember { mutableStateOf(0L to 0L) }
+    LaunchedEffect(watch?.trafficBaseRx) {
+        var lastRx = android.net.TrafficStats.getUidRxBytes(uid)
+        var lastTx = android.net.TrafficStats.getUidTxBytes(uid)
+        while (true) {
+            delay(1000)
+            val rx = android.net.TrafficStats.getUidRxBytes(uid)
+            val tx = android.net.TrafficStats.getUidTxBytes(uid)
+            history.add((rx - lastRx).coerceAtLeast(0) to (tx - lastTx).coerceAtLeast(0))
+            while (history.size > 60) history.removeAt(0)
+            lastRx = rx
+            lastTx = tx
+            val baseRx = watch?.trafficBaseRx?.takeIf { it > 0 } ?: rx
+            val baseTx = watch?.trafficBaseTx?.takeIf { it > 0 } ?: tx
+            totals = (rx - baseRx).coerceAtLeast(0) to (tx - baseTx).coerceAtLeast(0)
+        }
+    }
+    val now = history.lastOrNull() ?: (0L to 0L)
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("↓ " + speedText(context, now.first), color = TropaColors.Connected, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(14.dp))
+                Text("↑ " + speedText(context, now.second), color = TropaColors.BrandDark, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text(stringResource(R.string.tropa_traffic_now), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Canvas(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(vertical = 6.dp)
+            ) {
+                val peak = (history.maxOfOrNull { maxOf(it.first, it.second) } ?: 0L).coerceAtLeast(1024L).toFloat()
+                fun line(values: List<Long>, color: Color) {
+                    if (values.size < 2) return
+                    val step = size.width / 59f
+                    val offset = (60 - values.size) * step
+                    val path = Path()
+                    values.forEachIndexed { i, v ->
+                        val x = offset + i * step
+                        val y = size.height - size.height * (v / peak)
+                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    drawPath(path, color, style = Stroke(width = 2.dp.toPx()))
+                }
+                line(history.map { it.first }, TropaColors.Connected)
+                line(history.map { it.second }, TropaColors.Brand)
+            }
+            Text(
+                stringResource(
+                    R.string.tropa_traffic_session,
+                    Formatter.formatShortFileSize(context, totals.first),
+                    Formatter.formatShortFileSize(context, totals.second),
+                ),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun speedText(context: android.content.Context, bytesPerSecond: Long): String {
+    val bits = bytesPerSecond * 8
+    return when {
+        bits >= 1_000_000 -> String.format(Locale.getDefault(), "%.1f %s", bits / 1_000_000.0, context.getString(R.string.tropa_unit_mbps))
+        else -> String.format(Locale.getDefault(), "%d %s", bits / 1000, context.getString(R.string.tropa_unit_kbps))
+    }
+}
+
+/** Where the routing sends which addresses; geoip lists open as subnet lists. */
+@Composable
+private fun GeoBlock(rules: List<GeoRule>, onOpen: (GeoRef) -> Unit) {
+    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.tropa_geo_routing), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            rules.forEach { rule ->
+                val title = when (rule.target) {
+                    "direct" -> R.string.tropa_geo_direct
+                    "block" -> R.string.tropa_geo_block
+                    else -> R.string.tropa_geo_proxy
+                }
+                Text(stringResource(title), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                rule.items.take(30).forEach { item ->
+                    val ref = GeoRouting.parseRef(item)
+                    Text(
+                        item,
+                        fontSize = 14.sp,
+                        color = if (ref != null) TropaColors.Info else MaterialTheme.colorScheme.onSurface,
+                        modifier = if (ref != null) Modifier.clickable { onOpen(ref) } else Modifier,
+                    )
+                }
+                if (rule.items.size > 30) Text("… +${rule.items.size - 30}", fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+/** What the watchdog tried recently: server, address, result or error. */
+@Composable
+private fun CheckLog(watch: WatchState?) {
+    val events = watch?.log.orEmpty()
+    val time = remember { java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT) }
+    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.tropa_log_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            if (events.isEmpty()) {
+                Text(stringResource(R.string.tropa_log_empty), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            events.asReversed().take(40).forEach { e ->
+                val kind = when (e.kind) {
+                    "latency" -> R.string.tropa_log_latency
+                    "download" -> R.string.tropa_log_download
+                    "direct" -> R.string.tropa_log_direct
+                    else -> R.string.tropa_log_reload
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        Modifier
+                            .padding(top = 5.dp)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (e.ok) TropaColors.Connected else TropaColors.Problem)
+                    )
+                    Column {
+                        Text(
+                            "${time.format(java.util.Date(e.at))} · ${stringResource(kind)}" +
+                                (if (e.server.isNotEmpty()) " · ${e.server}" else ""),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (e.target.isNotEmpty()) {
+                            Text(e.target.removePrefix("https://"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        val result = when {
+                            e.kind == "reload" -> ""
+                            e.ok && e.kind == "download" -> stringResource(R.string.tropa_log_ok_bytes, e.latencyMs, Formatter.formatShortFileSize(LocalContext.current, e.bytes))
+                            e.ok -> stringResource(R.string.tropa_value_ms, e.latencyMs)
+                            else -> e.error.orEmpty()
+                        }
+                        if (result.isNotEmpty()) {
+                            Text(result, fontSize = 12.sp, color = if (e.ok) TropaColors.Connected else TropaColors.Problem)
+                        }
+                    }
+                }
             }
         }
     }

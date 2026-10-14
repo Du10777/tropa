@@ -137,4 +137,27 @@
     <string name="tropa_kill_switch_explain">In the Android VPN settings open Tropa and turn on «Always-on VPN» and «Block connections without VPN». An app cannot turn this on by itself.</string>
     <string name="tropa_kill_switch_open">Open VPN settings</string>
     <string name="tropa_perm_lockdown">Always-on VPN with blocking</string>
+
+    <!-- 0.4: traffic, check log, GeoIP, reports -->
+    <string name="tropa_traffic_now">now</string>
+    <string name="tropa_traffic_session">This connection: ↓ %1$s  ↑ %2$s</string>
+    <string name="tropa_unit_mbps">Mbit/s</string>
+    <string name="tropa_unit_kbps">kbit/s</string>
+    <string name="tropa_report_share">Send a report about the checks</string>
+    <string name="tropa_geo_routing">Routing</string>
+    <string name="tropa_geo_direct">Direct (bypassing VPN):</string>
+    <string name="tropa_geo_proxy">Through VPN:</string>
+    <string name="tropa_geo_block">Blocked:</string>
+    <string name="tropa_log_title">Check log</string>
+    <string name="tropa_log_empty">No checks yet: they start once the VPN is on.</string>
+    <string name="tropa_log_latency">latency</string>
+    <string name="tropa_log_download">download</string>
+    <string name="tropa_log_direct">internet without VPN</string>
+    <string name="tropa_log_reload">core restart</string>
+    <string name="tropa_log_ok_bytes">%1$d ms, %2$s</string>
+    <string name="tropa_settings_geo">Address databases (GeoIP)</string>
+    <string name="tropa_geo_search">Search</string>
+    <string name="tropa_geo_subnets_count">%1$d subnets</string>
+    <string name="tropa_geo_not_geoip">not a GeoIP database</string>
+    <string name="tropa_geo_missing">The file is not on the phone</string>
 </resources>

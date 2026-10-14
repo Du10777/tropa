@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.TrafficStats
+import android.os.Process
 import android.net.VpnService
 import android.os.Build
 import android.os.PowerManager
@@ -23,6 +25,7 @@ import io.github.du10777.tropa.data.Node
 import io.github.du10777.tropa.data.NodePlan
 import io.github.du10777.tropa.data.NodePlanner
 import io.github.du10777.tropa.data.NodeSelector
+import io.github.du10777.tropa.data.ProblemReports
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,6 +80,10 @@ object TropaWatchdog {
     private const val NO_INTERNET_RECHECK_MS = 30_000L
     private const val CHECKS_OFF_RECHECK_MS = 60_000L
     private const val ROTATE_PROFILE_AFTER = 2
+    private const val LOG_SIZE = 120
+
+    /** A problem report is saved once an outage lasts this many reconnect attempts. */
+    private const val REPORT_AFTER_ATTEMPTS = 3
 
     /** Servers answering within this time after the first one are compared, the best one wins. */
     private const val FIRST_ANSWER_WINDOW_MS = 1_000L
@@ -183,6 +190,11 @@ object TropaWatchdog {
         private var everConnected = false
         private var lostNotified = false
         private var phase = WatchPhase.CHECKING
+        private var connectedAt = 0L
+        private var reportSaved = false
+        private val trafficBaseRx = TrafficStats.getUidRxBytes(Process.myUid()).coerceAtLeast(0)
+        private val trafficBaseTx = TrafficStats.getUidTxBytes(Process.myUid()).coerceAtLeast(0)
+        private val log = ArrayDeque<ProbeEvent>()
 
         private val direct by lazy {
             OkHttpClient.Builder()
@@ -197,6 +209,7 @@ object TropaWatchdog {
             var attempt = 0
             while (currentCoroutineContext().isActive) {
                 if (!CheckSettings.enabled) {
+                    if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
                     publish(WatchPhase.CHECKS_OFF)
                     waitForWake(CHECKS_OFF_RECHECK_MS)
                     continue
@@ -210,6 +223,7 @@ object TropaWatchdog {
                 }
                 attempt++
                 if (!internetUp()) {
+                    connectedAt = 0L
                     publish(WatchPhase.NO_INTERNET)
                     notifyLost()
                     waitForWake(NO_INTERNET_RECHECK_MS)
@@ -218,7 +232,12 @@ object TropaWatchdog {
                 val pauseMs = NodeSelector.backoffSeconds(attempt) * 1000
                 publish(WatchPhase.NO_SERVER, attempt, System.currentTimeMillis() + pauseMs)
                 notifyLost()
+                if (attempt >= REPORT_AFTER_ATTEMPTS && !reportSaved) {
+                    reportSaved = ProblemReports.save(context, currentState(WatchPhase.NO_SERVER, attempt, 0L))
+                }
                 waitForWake(pauseMs)
+                record(ProbeEvent(System.currentTimeMillis(), "reload", "", null, "", ok = true))
+                connectedAt = 0L
                 reconnect(attempt)
                 loadPlan()
             }
@@ -303,19 +322,23 @@ object TropaWatchdog {
                 waitForWake(nextDelay)
                 ensureOverride()
                 val tag = activeTag ?: return
-                val result = probeLatency(tag)
-                selector.record(tag, result.ok, result.latencyMs.takeIf { result.ok })
+                val othersDue = plan.isBalanced && screenOn &&
+                    System.currentTimeMillis() - lastOthersAt >= CheckSettings.othersIntervalSec * 1000L
+                // All servers are checked at the same time, the active one included.
+                val tags = if (othersDue) plan.nodes.map { it.tag } else listOf(tag)
+                var results = probeAll(tags)
+                var result = results.getValue(tag)
+                if (othersDue) lastOthersAt = System.currentTimeMillis()
+                // A failed check of the active server needs fresh data about the others to fail over.
+                if (!result.ok && plan.isBalanced && !othersDue) {
+                    results = probeAll(plan.nodes.map { it.tag }.filter { it != tag })
+                    lastOthersAt = System.currentTimeMillis()
+                }
                 if (result.ok) {
                     lastLatency = result.latencyMs
                     checkedAt = System.currentTimeMillis()
                 }
                 val now = System.currentTimeMillis()
-                // A failed check of the active server needs fresh data about the others to fail over.
-                val othersDue = screenOn && now - lastOthersAt >= CheckSettings.othersIntervalSec * 1000L
-                if (plan.isBalanced && (othersDue || !result.ok)) {
-                    probeAll(plan.nodes.map { it.tag }.filter { it != tag })
-                    lastOthersAt = now
-                }
                 if (screenOn && result.ok && now - lastThroughputAt >= CheckSettings.throughputIntervalSec * 1000L) {
                     if (!throughputOk(tag)) selector.record(tag, ok = false, latencyMs = null)
                     lastThroughputAt = now
@@ -357,17 +380,25 @@ object TropaWatchdog {
             if (current != tag) override(tag)
         }
 
-        private suspend fun probeAll(tags: List<String>) = coroutineScope {
-            tags.map { tag -> async { tag to probeLatency(tag) } }.awaitAll().forEach { (tag, result) ->
+        /** Checks the servers in parallel and records the results. */
+        private suspend fun probeAll(tags: List<String>): Map<String, ProbeResult> = coroutineScope {
+            tags.map { tag -> async { tag to probeLatency(tag) } }.awaitAll().onEach { (tag, result) ->
                 selector.record(tag, result.ok, result.latencyMs.takeIf { result.ok })
-            }
+            }.toMap()
         }
 
-        /** A server is alive when any of the latency addresses answers through it. */
-        private fun probeLatency(tag: String): ProbeResult {
-            var last = ProbeResult(error = "no addresses")
-            for (url in CheckSettings.latencyUrls) {
-                last = probe(tag, url, LATENCY_TIMEOUT_MS, LATENCY_MAX_BYTES)
+        /**
+         * A server is alive when any of the latency addresses answers through it. All addresses are
+         * asked at once and the first success counts; the others finish in the background.
+         */
+        private suspend fun probeLatency(tag: String): ProbeResult {
+            val urls = CheckSettings.latencyUrls
+            if (urls.isEmpty()) return ProbeResult(error = "no addresses")
+            val answers = Channel<ProbeResult>(Channel.UNLIMITED)
+            urls.forEach { url -> scope.launch { answers.trySend(probe(tag, url, LATENCY_TIMEOUT_MS, LATENCY_MAX_BYTES, "latency")) } }
+            var last = ProbeResult(error = "no answer")
+            repeat(urls.size) {
+                last = answers.receive()
                 if (last.ok) return last
             }
             return last
@@ -376,22 +407,46 @@ object TropaWatchdog {
         /** At least 64 KB must come through: catches channels that stall after ~16 KB. */
         private fun throughputOk(tag: String): Boolean =
             CheckSettings.throughputUrls.any { url ->
-                val result = probe(tag, url, THROUGHPUT_TIMEOUT_MS, THROUGHPUT_MAX_BYTES)
+                val result = probe(tag, url, THROUGHPUT_TIMEOUT_MS, THROUGHPUT_MAX_BYTES, "download")
                 result.ok && result.bytes >= CheckSettings.THROUGHPUT_MIN_BYTES
             }
 
-        private fun probe(tag: String, url: String, timeoutMs: Long, maxBytes: Long): ProbeResult = try {
-            val json = CoreServiceManager.coreController.tropaProbe(tag, url, timeoutMs, maxBytes)
-            gson.fromJson(json, ProbeResult::class.java) ?: ProbeResult(error = "empty result")
-        } catch (e: Exception) {
-            ProbeResult(error = e.message ?: e.javaClass.simpleName)
+        private fun probe(tag: String, url: String, timeoutMs: Long, maxBytes: Long, kind: String): ProbeResult {
+            val result = try {
+                val json = CoreServiceManager.coreController.tropaProbe(tag, url, timeoutMs, maxBytes)
+                gson.fromJson(json, ProbeResult::class.java) ?: ProbeResult(error = "empty result")
+            } catch (e: Exception) {
+                ProbeResult(error = e.message ?: e.javaClass.simpleName)
+            }
+            val node = plan.nodes.firstOrNull { it.tag == tag }
+            record(
+                ProbeEvent(
+                    at = System.currentTimeMillis(),
+                    kind = kind,
+                    server = node?.name?.takeIf { it.isNotEmpty() } ?: tag,
+                    address = node?.address,
+                    target = url,
+                    ok = result.ok && (kind != "download" || result.bytes >= CheckSettings.THROUGHPUT_MIN_BYTES),
+                    latencyMs = result.latencyMs,
+                    bytes = result.bytes,
+                    error = result.error ?: if (kind == "download" && result.bytes < CheckSettings.THROUGHPUT_MIN_BYTES) "only ${result.bytes} bytes" else null,
+                ),
+            )
+            return result
+        }
+
+        private fun record(event: ProbeEvent) = synchronized(log) {
+            log.addLast(event)
+            while (log.size > LOG_SIZE) log.removeFirst()
         }
 
         /** Direct request outside the tunnel (the app itself is excluded from its VPN). */
         private fun internetUp(): Boolean = CheckSettings.directUrls.any { url ->
-            runCatching {
-                direct.newCall(Request.Builder().url(url).build()).execute().use { true }
-            }.getOrDefault(false)
+            val started = System.currentTimeMillis()
+            val error = runCatching { direct.newCall(Request.Builder().url(url).build()).execute().use { null } }
+                .getOrElse { it.message ?: it.javaClass.simpleName }
+            record(ProbeEvent(started, "direct", "", null, url, ok = error == null, latencyMs = System.currentTimeMillis() - started, error = error))
+            error == null
         }
 
         private fun reconnect(attempt: Int) {
@@ -415,6 +470,11 @@ object TropaWatchdog {
         }
 
         private fun onConnected() {
+            if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
+            if (reportSaved || ProblemReports.hasPending(context)) {
+                reportSaved = false
+                scope.launch { ProblemReports.uploadPending(context) }
+            }
             if (lostNotified) TropaNotifier.notifyRestored(context)
             lostNotified = false
             everConnected = true
@@ -432,6 +492,10 @@ object TropaWatchdog {
 
         private fun publish(phase: WatchPhase, attempt: Int = 0, nextRetryAt: Long = 0L) {
             this.phase = phase
+            WatchStateStore.publish(context, currentState(phase, attempt, nextRetryAt))
+        }
+
+        private fun currentState(phase: WatchPhase, attempt: Int, nextRetryAt: Long): WatchState {
             val vpn = CoreServiceManager.serviceControl?.get()?.getService() as? VpnService
             val q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
             val nodes = plan.nodes.filter { it.tag.isNotEmpty() }.map { node ->
@@ -444,9 +508,7 @@ object TropaWatchdog {
                     active = node.tag == activeTag,
                 )
             }
-            WatchStateStore.publish(
-                context,
-                WatchState(
+            return WatchState(
                     phase = phase,
                     activeName = plan.nodes.firstOrNull { it.tag == activeTag }?.name?.takeIf { it.isNotEmpty() },
                     latencyMs = lastLatency,
@@ -456,8 +518,11 @@ object TropaWatchdog {
                     nodes = nodes,
                     alwaysOn = if (q) vpn?.isAlwaysOn else null,
                     lockdown = if (q) vpn?.isLockdownEnabled else null,
-                ),
-            )
+                    connectedAt = if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF) connectedAt else 0L,
+                    trafficBaseRx = trafficBaseRx,
+                    trafficBaseTx = trafficBaseTx,
+                    log = synchronized(log) { log.toList() },
+                )
         }
     }
 }

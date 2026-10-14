@@ -89,6 +89,9 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         SettingsRow(R.drawable.ic_check_update_24dp, stringResource(R.string.tropa_settings_checks), null) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaChecksActivity::class.java))
                         }
+                        SettingsRow(R.drawable.ic_routing_24dp, stringResource(R.string.tropa_settings_geo), null) {
+                            startActivity(TropaGeoActivity.intent(this@TropaSettingsActivity))
+                        }
                         KillSwitchRow(
                             enabled = killSwitch,
                             status = killSwitchStatus(),

@@ -136,4 +136,27 @@
     <string name="tropa_kill_switch_explain">В настройках VPN откройте Тропу и включите «Постоянный VPN» и «Блокировать подключения без VPN». Включить это само приложение не может.</string>
     <string name="tropa_kill_switch_open">Открыть настройки VPN</string>
     <string name="tropa_perm_lockdown">Постоянный VPN с блокировкой</string>
+
+    <!-- 0.4: traffic, check log, GeoIP, reports -->
+    <string name="tropa_traffic_now">сейчас</string>
+    <string name="tropa_traffic_session">За подключение: ↓ %1$s  ↑ %2$s</string>
+    <string name="tropa_unit_mbps">Мбит/с</string>
+    <string name="tropa_unit_kbps">Кбит/с</string>
+    <string name="tropa_report_share">Отправить отчёт о проверках</string>
+    <string name="tropa_geo_routing">Маршрутизация</string>
+    <string name="tropa_geo_direct">Напрямую (мимо VPN):</string>
+    <string name="tropa_geo_proxy">Через VPN:</string>
+    <string name="tropa_geo_block">Блокируется:</string>
+    <string name="tropa_log_title">Журнал проверок</string>
+    <string name="tropa_log_empty">Проверок пока нет: они начинаются, когда VPN включён.</string>
+    <string name="tropa_log_latency">задержка</string>
+    <string name="tropa_log_download">скачивание</string>
+    <string name="tropa_log_direct">интернет без VPN</string>
+    <string name="tropa_log_reload">перезапуск ядра</string>
+    <string name="tropa_log_ok_bytes">%1$d мс, %2$s</string>
+    <string name="tropa_settings_geo">Базы адресов (GeoIP)</string>
+    <string name="tropa_geo_search">Поиск</string>
+    <string name="tropa_geo_subnets_count">%1$d подсетей</string>
+    <string name="tropa_geo_not_geoip">не база GeoIP</string>
+    <string name="tropa_geo_missing">Файла нет на телефоне</string>
 </resources>
