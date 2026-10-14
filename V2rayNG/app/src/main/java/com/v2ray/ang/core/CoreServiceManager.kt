@@ -46,7 +46,8 @@ import java.net.InetSocketAddress
 
 object CoreServiceManager {
 
-    private val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
+    // FORK: internal (was private) so the Tropa watchdog can probe servers and steer the balancer.
+    internal val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
     private val mMsgReceive = ReceiveMessageHandler()
     private var currentConfig: ProfileItem? = null
     private var processFinder: XrayProcessFinder? = null
@@ -252,7 +253,8 @@ object CoreServiceManager {
      *
      * @return True if the core is running again.
      */
-    private fun reloadCore(): Boolean {
+    // FORK: internal (was private) so the Tropa watchdog can reconnect without dropping the VPN.
+    internal fun reloadCore(): Boolean {
         if (isReloading) return false
         val service = getService() ?: return false
         if (!isRunning()) return false
