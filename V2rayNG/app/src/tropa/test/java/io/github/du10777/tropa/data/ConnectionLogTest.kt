@@ -22,4 +22,24 @@ class ConnectionLogTest {
     fun `nothing is kept when even the newest line is too big`() {
         assertEquals(emptyList<String>(), ConnectionLog.keepNewest(listOf("0123456789"), 5))
     }
+
+    @Test
+    fun `each level writes its share of server checks`() {
+        // ok, steady -> written?
+        val cases = mapOf(
+            LogLevel.ERRORS to listOf(false, false, true, false),
+            LogLevel.NORMAL to listOf(true, false, true, false),
+            LogLevel.VERBOSE to listOf(true, true, true, true),
+            LogLevel.DEBUG to listOf(true, true, true, true),
+        )
+        cases.forEach { (level, expected) ->
+            val actual = listOf(
+                ConnectionLog.writesCheck(level, ok = true, steady = false),
+                ConnectionLog.writesCheck(level, ok = true, steady = true),
+                ConnectionLog.writesCheck(level, ok = false, steady = false),
+                ConnectionLog.writesCheck(level, ok = false, steady = true),
+            )
+            assertEquals(expected, actual, level.name)
+        }
+    }
 }

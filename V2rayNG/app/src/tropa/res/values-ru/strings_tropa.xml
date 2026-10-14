@@ -166,7 +166,7 @@
     <string name="tropa_log_clear_confirm">Очистить журнал подключения?</string>
     <string name="tropa_log_copied">Журнал скопирован</string>
     <string name="tropa_log_cleared">Журнал очищен</string>
-    <string name="tropa_log_size">Размер: %1$s из %2$s, старые записи удаляются сами</string>
+    <string name="tropa_log_size">%1$s из %2$s</string>
     <string name="tropa_log_start">VPN включён</string>
     <string name="tropa_log_stop">VPN выключен</string>
     <string name="tropa_log_connected">Подключено</string>
@@ -175,6 +175,28 @@
     <string name="tropa_log_switch">Новые соединения через</string>
     <string name="tropa_size_kb">%1$s КБ</string>
     <string name="tropa_size_mb">%1$s МБ</string>
-    <string name="tropa_settings_log_size">Размер журнала подключения</string>
-    <string name="tropa_settings_log_size_hint">Когда журнал станет больше, самые старые записи удаляются.</string>
+
+    <!-- 0.6: log levels -->
+    <string name="tropa_log_level">Уровень журнала</string>
+    <string name="tropa_log_level_changed">Уровень журнала: %1$s</string>
+    <string name="tropa_log_level_errors">Только ошибки</string>
+    <string name="tropa_log_level_errors_hint">Сбои проверок и события подключения</string>
+    <string name="tropa_log_level_normal">Обычный</string>
+    <string name="tropa_log_level_normal_hint">Плюс успешные проверки; пока всё работает — раз в 10 минут</string>
+    <string name="tropa_log_level_verbose">Подробный</string>
+    <string name="tropa_log_level_verbose_hint">Каждая проверка каждого сервера, сведения о сети и список серверов</string>
+    <string name="tropa_log_level_debug">Отладка</string>
+    <string name="tropa_log_level_debug_hint">Всё: каждый адрес проверки с кодом ответа, экран, сообщения ядра Xray. Для поиска проблем — журнал растёт быстро</string>
+    <string name="tropa_log_size_title">Размер журнала</string>
+    <string name="tropa_log_size_hint">Когда журнал станет больше, самые старые записи удаляются.</string>
+    <string name="tropa_log_network">Сеть: %1$s</string>
+    <string name="tropa_network_wifi">Wi-Fi</string>
+    <string name="tropa_network_cellular">мобильная</string>
+    <string name="tropa_network_ethernet">Ethernet</string>
+    <string name="tropa_network_none">нет</string>
+    <string name="tropa_network_other">другая</string>
+    <string name="tropa_log_servers">Серверы</string>
+    <string name="tropa_log_screen_on">Экран включён</string>
+    <string name="tropa_log_screen_off">Экран выключен</string>
+    <string name="tropa_log_core">Ядро Xray</string>
 </resources>

@@ -58,6 +58,15 @@ object LinkParser {
         return null
     }
 
+    /**
+     * A Tropa link (`xsub://`) in [text]. Only these are offered from the clipboard on their own:
+     * other links are added by tapping «Add copied link».
+     */
+    fun findTropaLink(text: String?): LinkCandidate.Subscription? {
+        val match = XSUB.find(text?.trim().orEmpty()) ?: return null
+        return decodeXsub(match.groupValues[1])?.let { LinkCandidate.Subscription(it, match.value) }
+    }
+
     /** Decodes the payload of an `xsub://` link into an https (or explicit scheme) address. */
     fun decodeXsub(payload: String): String? {
         val decoded = Base64Codec.decode(payload)?.toString(Charsets.UTF_8)?.trim() ?: return null

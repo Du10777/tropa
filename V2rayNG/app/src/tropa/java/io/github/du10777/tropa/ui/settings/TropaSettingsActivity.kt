@@ -64,13 +64,19 @@ import io.github.du10777.tropa.ui.theme.TropaTheme
 class TropaSettingsActivity : BaseComponentActivity() {
     private var advancedMode by mutableStateOf(TropaPrefs.advancedMode)
 
+    /** Changed on the log screen; read again when coming back. */
+    private var logLevel by mutableStateOf(ConnectionLog.level)
+
+    override fun onResume() {
+        super.onResume()
+        logLevel = ConnectionLog.level
+    }
+
     @Composable
     override fun ScreenContent() {
         TropaTheme {
             var choosingLanguage by remember { mutableStateOf(false) }
             var killSwitch by remember { mutableStateOf(CheckSettings.killSwitch) }
-            var choosingLogSize by remember { mutableStateOf(false) }
-            var logLimit by remember { mutableStateOf(ConnectionLog.limitKb) }
             var explainKillSwitch by remember { mutableStateOf(false) }
             Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
                 Column(Modifier.systemBarsPadding()) {
@@ -93,14 +99,9 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         SettingsRow(R.drawable.ic_check_update_24dp, stringResource(R.string.tropa_settings_checks), null) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaChecksActivity::class.java))
                         }
-                        SettingsRow(R.drawable.ic_description_24dp, stringResource(R.string.tropa_log_title), null) {
+                        SettingsRow(R.drawable.ic_description_24dp, stringResource(R.string.tropa_log_title), stringResource(logLevel.title)) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaLogActivity::class.java))
                         }
-                        SettingsRow(
-                            R.drawable.ic_logcat_24dp,
-                            stringResource(R.string.tropa_settings_log_size),
-                            ConnectionLog.sizeLabel(this@TropaSettingsActivity, logLimit * 1024L),
-                        ) { choosingLogSize = true }
                         SettingsRow(R.drawable.ic_routing_24dp, stringResource(R.string.tropa_settings_geo), null) {
                             startActivity(TropaGeoActivity.intent(this@TropaSettingsActivity))
                         }
@@ -129,38 +130,6 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         }
                     }
                 }
-            }
-            if (choosingLogSize) {
-                AlertDialog(
-                    onDismissRequest = { choosingLogSize = false },
-                    title = { Text(stringResource(R.string.tropa_settings_log_size)) },
-                    text = {
-                        Column {
-                            Text(stringResource(R.string.tropa_settings_log_size_hint), fontSize = 13.sp)
-                            ConnectionLog.LIMIT_CHOICES_KB.forEach { kb ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .selectable(selected = kb == logLimit, onClick = {
-                                            logLimit = kb
-                                            ConnectionLog.limitKb = kb
-                                            choosingLogSize = false
-                                        }, role = Role.RadioButton)
-                                        .padding(vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    RadioButton(selected = kb == logLimit, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = TropaColors.Brand))
-                                    Text(
-                                        ConnectionLog.sizeLabel(this@TropaSettingsActivity, kb * 1024L),
-                                        fontSize = 16.sp,
-                                        modifier = Modifier.padding(start = 12.dp),
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    confirmButton = { TextButton(onClick = { choosingLogSize = false }) { Text(stringResource(R.string.tropa_cancel)) } },
-                )
             }
             if (explainKillSwitch) {
                 AlertDialog(

@@ -5,6 +5,7 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.SettingsManager
 import io.github.du10777.tropa.data.AddResult
 import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.Connections
@@ -62,6 +63,9 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         reload()
         monitor.start()
+        // The upstream main screen copies geoip.dat / geosite.dat from the APK; without them configs
+        // with geoip:/geosite: rules do not start. Tropa's screen replaces it, so it copies them too.
+        viewModelScope.launch(Dispatchers.IO) { SettingsManager.initAssets(app, app.assets) }
         viewModelScope.launch {
             combine(monitor.state, monitor.lastError, monitor.watch) { core, error, watch -> Triple(core, error, watch) }
                 .collect { (core, error, watch) ->
@@ -113,11 +117,12 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
     fun onClipboardText(text: String?) {
         val offer = text?.takeIf { it.isNotBlank() }?.let { clip ->
             val fingerprint = fingerprint(clip)
-            val candidate = LinkParser.parse(clip)
+            // Only our own xsub:// links are offered: any copied https:// address would pop up otherwise.
+            val candidate = LinkParser.findTropaLink(clip)
             when {
                 fingerprint == TropaPrefs.handledClip -> null
                 candidate == null -> null
-                candidate is LinkCandidate.Subscription && state.value.connections.any { it.url == candidate.url } -> null
+                state.value.connections.any { it.url == candidate.url } -> null
                 else -> ClipOffer(fingerprint, clip)
             }
         }

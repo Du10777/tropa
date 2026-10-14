@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.TrafficStats
 import android.os.Process
 import android.net.VpnService
@@ -22,6 +23,7 @@ import com.v2ray.ang.util.LogUtil
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.Connections
+import io.github.du10777.tropa.data.LogLevel
 import io.github.du10777.tropa.data.Node
 import io.github.du10777.tropa.data.NodePlan
 import io.github.du10777.tropa.data.NodePlanner
@@ -36,11 +38,16 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.net.Inet6Address
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -95,6 +102,9 @@ object TropaWatchdog {
     /** While connected, a server check with the same outcome as before is logged once in this time. */
     private const val QUIET_LOG_MS = 10 * 60_000L
 
+    /** How often the core log reader follows log level changes. */
+    private const val CORE_LOG_POLL_MS = 3_000L
+
     private var scope: CoroutineScope? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
@@ -103,16 +113,89 @@ object TropaWatchdog {
     private var signalsRegistered = false
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    /** The last network written to the log, so repeated callbacks do not repeat it. */
+    @Volatile
+    private var lastNetwork: String? = null
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_OFF -> screenOn = false
+                Intent.ACTION_SCREEN_OFF -> {
+                    screenOn = false
+                    context?.let { logScreen(it, on = false) }
+                }
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                    if (!screenOn) context?.let { logScreen(it, on = true) }
                     screenOn = true
                     wakeUp()
                 }
             }
         }
+    }
+
+    private fun logScreen(context: Context, on: Boolean) {
+        if (ConnectionLog.level != LogLevel.DEBUG) return
+        val app = context.applicationContext
+        scope?.launch { ConnectionLog.append(app, ProbeEvent(System.currentTimeMillis(), if (on) "screen_on" else "screen_off", "", null, "", ok = true)) }
+    }
+
+    /** Writes the network Tropa runs over when it changes: its type, and details from the verbose level. */
+    private fun logNetwork(app: Context) {
+        val level = ConnectionLog.level
+        if (level == LogLevel.ERRORS) return
+        val cm = app.getSystemService(ConnectivityManager::class.java) ?: return
+        val network = runCatching { underlyingNetwork(cm) }.getOrNull()
+        val caps = network?.let { runCatching { cm.getNetworkCapabilities(it) }.getOrNull() }
+        val type = when {
+            caps == null -> "none"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+            else -> "other"
+        }
+        val detail = if (level >= LogLevel.VERBOSE && network != null) networkDetails(cm, network, caps) else null
+        val key = "$type|$detail"
+        if (key == lastNetwork) return
+        lastNetwork = key
+        val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        ConnectionLog.append(app, ProbeEvent(System.currentTimeMillis(), "network", "", null, type, ok = validated, detail = detail))
+    }
+
+    /**
+     * The physical network under the VPN. Android may report the VPN itself as the default network
+     * even to the app it excludes, so then the best other network with internet is taken.
+     */
+    @Suppress("DEPRECATION")
+    private fun underlyingNetwork(cm: ConnectivityManager): Network? {
+        val active = cm.activeNetwork
+        if (active != null && cm.getNetworkCapabilities(active)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == false) return active
+        return cm.allNetworks
+            .mapNotNull { network -> cm.getNetworkCapabilities(network)?.let { network to it } }
+            .filter { (_, caps) -> !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) }
+            .sortedWith(
+                compareByDescending<Pair<Network, NetworkCapabilities>> { it.second.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) }
+                    .thenByDescending { it.second.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) }
+            )
+            .firstOrNull()?.first
+    }
+
+    private fun networkDetails(cm: ConnectivityManager, network: Network, caps: NetworkCapabilities?): String {
+        val link = runCatching { cm.getLinkProperties(network) }.getOrNull()
+        return buildList {
+            if (caps != null) {
+                add(if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) "validated" else "not validated")
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)) add("captive portal")
+                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) add("metered")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING)) add("roaming")
+            }
+            link?.interfaceName?.let { add(it) }
+            link?.dnsServers?.takeIf { it.isNotEmpty() }?.let { dns -> add("DNS " + dns.joinToString(" ") { it.hostAddress ?: "?" }) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && link?.isPrivateDnsActive == true) add("private DNS " + (link.privateDnsServerName ?: "auto"))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) link?.mtu?.takeIf { it > 0 }?.let { add("MTU $it") }
+            link?.linkAddresses?.let { addresses ->
+                add(if (addresses.any { it.address is Inet6Address && !it.address.isLinkLocalAddress }) "IPv6" else "no IPv6")
+            }
+        }.joinToString(" · ")
     }
 
     @Synchronized
@@ -151,8 +234,18 @@ object TropaWatchdog {
         }
         ContextCompat.registerReceiver(app, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) = wakeUp()
-            override fun onLost(network: Network) = wakeUp()
+            override fun onAvailable(network: Network) {
+                logNetwork(app)
+                wakeUp()
+            }
+
+            override fun onLost(network: Network) {
+                logNetwork(app)
+                wakeUp()
+            }
+
+            // A VPN default network changes its capabilities when the network under it changes.
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) = logNetwork(app)
         }
         runCatching { app.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(callback) }
             .onSuccess { networkCallback = callback }
@@ -197,8 +290,9 @@ object TropaWatchdog {
         private var phase = WatchPhase.CHECKING
         private var connectedAt = 0L
         private var reportSaved = false
-        /** Outcome and time of the last logged check per server, to keep steady periods short in the log. */
-        private val lastLogged = ConcurrentHashMap<String, Pair<Boolean, Long>>()
+        /** Last outcome and last written check of each server, to keep steady periods short in the log. */
+        private val lastOutcome = ConcurrentHashMap<String, Boolean>()
+        private val lastWrittenAt = ConcurrentHashMap<String, Long>()
         private val trafficBaseRx = TrafficStats.getUidRxBytes(Process.myUid()).coerceAtLeast(0)
         private val trafficBaseTx = TrafficStats.getUidTxBytes(Process.myUid()).coerceAtLeast(0)
 
@@ -212,6 +306,9 @@ object TropaWatchdog {
 
         suspend fun run() {
             record(ProbeEvent(System.currentTimeMillis(), "start", "", null, "", ok = true))
+            lastNetwork = null
+            logNetwork(context)
+            scope.launch { captureCore() }
             loadPlan()
             var attempt = 0
             while (currentCoroutineContext().isActive) {
@@ -263,7 +360,48 @@ object TropaWatchdog {
             activeTag = null
             lastOthersAt = 0L
             lastThroughputAt = 0L
+            if (ConnectionLog.level >= LogLevel.VERBOSE) {
+                val names = plan.nodes.joinToString(", ") { it.name.ifEmpty { it.tag.ifEmpty { "?" } } }
+                record(ProbeEvent(System.currentTimeMillis(), "servers", "", null, "", ok = true, detail = names + (if (plan.balancerTag != null) " · balancer" else "")))
+            }
         }
+
+        /** At the debug level, copies the Xray core messages (logcat tag GoLog of this app) into the log. */
+        private suspend fun captureCore() {
+            var reader: java.lang.Process? = null
+            try {
+                while (currentCoroutineContext().isActive) {
+                    val wanted = ConnectionLog.level == LogLevel.DEBUG
+                    if (wanted && (reader == null || !alive(reader))) {
+                        reader?.destroy()
+                        reader = startCoreReader()
+                    } else if (!wanted && reader != null) {
+                        reader.destroy()
+                        reader = null
+                    }
+                    delay(CORE_LOG_POLL_MS)
+                }
+            } finally {
+                reader?.destroy()
+            }
+        }
+
+        private fun alive(process: java.lang.Process): Boolean = runCatching { process.exitValue() }.isFailure
+
+        private fun startCoreReader(): java.lang.Process? = runCatching {
+            val since = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
+            ProcessBuilder("logcat", "-v", "brief", "-T", since, "-s", "GoLog").redirectErrorStream(true).start()
+        }.onSuccess { process ->
+            scope.launch {
+                runCatching {
+                    process.inputStream.bufferedReader().forEachLine { line ->
+                        // "W/GoLog  ( 1694): [Warning] core: Xray 26.10.10 started"
+                        val text = line.substringAfter("): ", "").trim()
+                        if (text.isNotEmpty()) record(ProbeEvent(System.currentTimeMillis(), "core", "", null, "", ok = !text.startsWith("[Error]"), detail = text))
+                    }
+                }
+            }
+        }.onFailure { LogUtil.e(TAG, "cannot read the core log", it) }.getOrNull()
 
         /**
          * Checks all servers at once and connects through the first one that answers: servers that
@@ -403,35 +541,56 @@ object TropaWatchdog {
         private suspend fun probeLatency(tag: String): ProbeResult {
             val urls = CheckSettings.latencyUrls
             if (urls.isEmpty()) return ProbeResult(error = "no addresses")
+            // At the debug level every address is written by itself, the late ones too.
+            val perAddress = ConnectionLog.level == LogLevel.DEBUG
             val answers = Channel<Pair<String, ProbeResult>>(Channel.UNLIMITED)
-            urls.forEach { url -> scope.launch { answers.trySend(url to probe(tag, url, LATENCY_TIMEOUT_MS, LATENCY_MAX_BYTES)) } }
+            urls.forEach { url ->
+                scope.launch {
+                    val result = probe(tag, url, LATENCY_TIMEOUT_MS, LATENCY_MAX_BYTES)
+                    if (perAddress) record(event(tag, "latency", url, result.ok, result, detail = httpStatus(result)))
+                    answers.trySend(url to result)
+                }
+            }
             val errors = LinkedHashMap<String, String>()
             var last = ProbeResult(error = "no answer")
             repeat(urls.size) {
                 val (url, result) = answers.receive()
                 last = result
                 if (result.ok) {
-                    recordCheck(tag, event(tag, "latency", url, ok = true, result))
+                    recordCheck(tag, event(tag, "latency", url, ok = true, result), write = !perAddress)
                     return result
                 }
                 errors[url] = result.error ?: "error"
             }
             val details = errors.entries.joinToString("; ") { (url, error) -> "${hostOf(url)}: ${shortError(error)}" }
-            recordCheck(tag, event(tag, "latency", "", ok = false, last, error = details))
+            recordCheck(tag, event(tag, "latency", "", ok = false, last, error = details), write = !perAddress)
             return last
         }
+
+        private fun httpStatus(result: ProbeResult): String? = result.status.takeIf { it > 0 }?.let { "HTTP $it" }
 
         private fun hostOf(url: String): String = runCatching { java.net.URI(url).host }.getOrNull() ?: url
 
         /** Go errors repeat the address (`Get "https://…": context deadline exceeded`); the reason is enough. */
         private fun shortError(error: String): String = error.substringAfterLast("\": ").removePrefix("net/http: ")
 
-        /** While connected, a check that ends like the previous one is logged once in [QUIET_LOG_MS]. */
-        private fun recordCheck(tag: String, event: ProbeEvent) {
-            val previous = lastLogged[tag]
-            val unchanged = previous != null && previous.first == event.ok && event.at - previous.second < QUIET_LOG_MS
-            if (phase == WatchPhase.CONNECTED && unchanged) return
-            lastLogged[tag] = event.ok to event.at
+        /**
+         * Writes a server check as the log level asks. While connected, a check that ends like the
+         * previous one is written once in [QUIET_LOG_MS] (normal and errors-only levels).
+         */
+        private fun recordCheck(tag: String, event: ProbeEvent, write: Boolean = true) {
+            val previous = lastOutcome.put(tag, event.ok)
+            if (!write) return
+            val steady = phase == WatchPhase.CONNECTED && previous == event.ok &&
+                event.at - (lastWrittenAt[tag] ?: 0L) < QUIET_LOG_MS
+            if (!ConnectionLog.writesCheck(ConnectionLog.level, event.ok, steady)) return
+            lastWrittenAt[tag] = event.at
+            record(event)
+        }
+
+        /** Download and direct checks: at the errors-only level just the failed ones. */
+        private fun recordResult(event: ProbeEvent) {
+            if (event.ok && ConnectionLog.level == LogLevel.ERRORS) return
             record(event)
         }
 
@@ -440,7 +599,8 @@ object TropaWatchdog {
             CheckSettings.throughputUrls.any { url ->
                 val result = probe(tag, url, THROUGHPUT_TIMEOUT_MS, THROUGHPUT_MAX_BYTES)
                 val ok = result.ok && result.bytes >= CheckSettings.THROUGHPUT_MIN_BYTES
-                record(event(tag, "download", url, ok, result, error = result.error ?: if (!ok) "only ${result.bytes} bytes" else null))
+                val detail = if (ConnectionLog.level == LogLevel.DEBUG) httpStatus(result) else null
+                recordResult(event(tag, "download", url, ok, result, error = result.error ?: if (!ok) "only ${result.bytes} bytes" else null, detail = detail))
                 ok
             }
 
@@ -451,7 +611,15 @@ object TropaWatchdog {
             ProbeResult(error = e.message ?: e.javaClass.simpleName)
         }
 
-        private fun event(tag: String, kind: String, target: String, ok: Boolean, result: ProbeResult, error: String? = result.error): ProbeEvent {
+        private fun event(
+            tag: String,
+            kind: String,
+            target: String,
+            ok: Boolean,
+            result: ProbeResult,
+            error: String? = result.error,
+            detail: String? = null,
+        ): ProbeEvent {
             val node = plan.nodes.firstOrNull { it.tag == tag }
             return ProbeEvent(
                 at = System.currentTimeMillis(),
@@ -463,6 +631,7 @@ object TropaWatchdog {
                 latencyMs = result.latencyMs,
                 bytes = result.bytes,
                 error = error,
+                detail = detail,
             )
         }
 
@@ -471,9 +640,11 @@ object TropaWatchdog {
         /** Direct request outside the tunnel (the app itself is excluded from its VPN). */
         private fun internetUp(): Boolean = CheckSettings.directUrls.any { url ->
             val started = System.currentTimeMillis()
-            val error = runCatching { direct.newCall(Request.Builder().url(url).build()).execute().use { null } }
+            var status = 0
+            val error = runCatching { direct.newCall(Request.Builder().url(url).build()).execute().use { status = it.code }; null }
                 .getOrElse { it.message ?: it.javaClass.simpleName }
-            record(ProbeEvent(started, "direct", "", null, url, ok = error == null, latencyMs = System.currentTimeMillis() - started, error = error))
+            val detail = if (ConnectionLog.level == LogLevel.DEBUG && status > 0) "HTTP $status" else null
+            recordResult(ProbeEvent(started, "direct", "", null, url, ok = error == null, latencyMs = System.currentTimeMillis() - started, error = error, detail = detail))
             error == null
         }
 

@@ -13,18 +13,34 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToLong
 
+/** How much goes into the connection log, like the verbosity of command line tools. */
+enum class LogLevel(val title: Int, val hint: Int) {
+    /** Failed checks and connection events. */
+    ERRORS(R.string.tropa_log_level_errors, R.string.tropa_log_level_errors_hint),
+
+    /** Plus successful checks; while nothing changes, a server is written once in 10 minutes. */
+    NORMAL(R.string.tropa_log_level_normal, R.string.tropa_log_level_normal_hint),
+
+    /** Every check of every server, network details and the server list. */
+    VERBOSE(R.string.tropa_log_level_verbose, R.string.tropa_log_level_verbose_hint),
+
+    /** Everything: each check address with its HTTP status, screen on and off, Xray core messages. */
+    DEBUG(R.string.tropa_log_level_debug, R.string.tropa_log_level_debug_hint),
+}
+
 /**
- * Connection log: every check, reconnect and session start/stop, one JSON line per event.
+ * Connection log: checks, reconnects and session events, one JSON line per event.
  * The VPN service process appends, the UI reads, copies, shares and clears it. It survives
- * disconnects and is trimmed to the size set in the settings (oldest events go first).
+ * disconnects and is trimmed to the size set on the log screen (oldest events go first).
  */
 object ConnectionLog {
     private const val FILE = "tropa_connection_log.jsonl"
     private const val LOCK = "tropa_connection_log.lock"
     private const val LIMIT_KEY = "tropa_log_limit_kb"
+    private const val LEVEL_KEY = "tropa_log_level"
     private const val DEFAULT_LIMIT_KB = 1024
 
-    /** Size limits offered in the settings, KB. */
+    /** Size limits offered on the log screen, KB. */
     val LIMIT_CHOICES_KB = listOf(256, 512, 1024, 2048, 5120)
 
     private val gson = Gson()
@@ -35,6 +51,23 @@ object ConnectionLog {
         set(value) {
             MmkvManager.encodeSettings(LIMIT_KEY, value)
         }
+
+    var level: LogLevel
+        get() = MmkvManager.decodeSettingsString(LEVEL_KEY)?.let { name -> LogLevel.entries.firstOrNull { it.name == name } }
+            ?: LogLevel.NORMAL
+        set(value) {
+            MmkvManager.encodeSettings(LEVEL_KEY, value.name)
+        }
+
+    /**
+     * Whether a server check is written at [level]. [steady]: connected, and the check ended like
+     * the previous one while the last written check of this server is recent.
+     */
+    fun writesCheck(level: LogLevel, ok: Boolean, steady: Boolean): Boolean = when (level) {
+        LogLevel.ERRORS -> !ok && !steady
+        LogLevel.NORMAL -> !steady
+        LogLevel.VERBOSE, LogLevel.DEBUG -> true
+    }
 
     private fun file(context: Context) = File(context.filesDir, FILE)
 
@@ -51,6 +84,16 @@ object ConnectionLog {
                 f.appendText(gson.toJson(event) + "\n")
                 val limit = limitKb * 1024L
                 if (f.length() > limit) trim(f, limit * 3 / 4)
+            }
+        }
+    }
+
+    /** Applies a lowered limit right away instead of on the next entry. */
+    fun trimToLimit(context: Context) {
+        runCatching {
+            locked(context) { f ->
+                val limit = limitKb * 1024L
+                if (f.exists() && f.length() > limit) trim(f, limit * 3 / 4)
             }
         }
     }
@@ -101,22 +144,49 @@ object ConnectionLog {
         val time = SimpleDateFormat("dd.MM HH:mm:ss", Locale.ROOT)
         return buildString {
             events.forEach { e ->
-                append(time.format(Date(e.at))).append(' ').append(kindLabel(context, e.kind))
+                append(time.format(Date(e.at))).append(' ').append(title(context, e))
                 if (e.server.isNotEmpty()) append(" [").append(e.server).append(e.address?.let { " $it" } ?: "").append(']')
-                if (e.target.isNotEmpty()) append(' ').append(e.target)
+                if (e.target.isNotEmpty() && e.kind !in TARGET_IN_TITLE) append(' ').append(e.target)
                 when {
-                    e.kind in SESSION_KINDS -> Unit
+                    e.kind in SESSION_KINDS || e.kind in NOTE_KINDS -> Unit
                     e.ok && e.kind == "download" -> append(" → OK ${e.latencyMs} ms, ${e.bytes} B")
                     e.ok -> append(" → OK ${e.latencyMs} ms")
                     else -> append(" → ").append(e.error ?: "error")
                 }
+                if (!e.detail.isNullOrEmpty()) append(" · ").append(e.detail)
                 append('\n')
             }
         }
     }
 
-    /** Events that mark sessions rather than checks. */
-    val SESSION_KINDS = setOf("start", "stop", "connected", "no_server", "no_internet", "reload", "switch")
+    /** Events that mark sessions and changes rather than checks: shown as chips. */
+    val SESSION_KINDS = setOf("start", "stop", "connected", "no_server", "no_internet", "reload", "switch", "network", "servers", "level")
+
+    /** Small notes: shown as plain grey lines. */
+    val NOTE_KINDS = setOf("screen_on", "screen_off", "core")
+
+    /** Kinds whose target is part of the title (network type, log level). */
+    private val TARGET_IN_TITLE = setOf("network", "level")
+
+    /** The headline of an event: "Network: Wi-Fi", "Log level: Debug", "Latency". */
+    fun title(context: Context, e: ProbeEvent): String = when (e.kind) {
+        "network" -> context.getString(R.string.tropa_log_network, networkLabel(context, e.target))
+        "level" -> context.getString(
+            R.string.tropa_log_level_changed,
+            LogLevel.entries.firstOrNull { it.name == e.target }?.let { context.getString(it.title) } ?: e.target,
+        )
+        else -> kindLabel(context, e.kind)
+    }
+
+    fun networkLabel(context: Context, type: String): String = context.getString(
+        when (type) {
+            "wifi" -> R.string.tropa_network_wifi
+            "cellular" -> R.string.tropa_network_cellular
+            "ethernet" -> R.string.tropa_network_ethernet
+            "none" -> R.string.tropa_network_none
+            else -> R.string.tropa_network_other
+        }
+    )
 
     fun kindLabel(context: Context, kind: String): String = context.getString(
         when (kind) {
@@ -129,6 +199,10 @@ object ConnectionLog {
             "no_server" -> R.string.tropa_log_no_server
             "no_internet" -> R.string.tropa_log_no_internet
             "switch" -> R.string.tropa_log_switch
+            "servers" -> R.string.tropa_log_servers
+            "screen_on" -> R.string.tropa_log_screen_on
+            "screen_off" -> R.string.tropa_log_screen_off
+            "core" -> R.string.tropa_log_core
             else -> R.string.tropa_log_reload
         }
     )

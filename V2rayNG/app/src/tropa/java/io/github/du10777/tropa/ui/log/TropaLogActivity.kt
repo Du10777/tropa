@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.text.format.Formatter
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,9 +55,11 @@ import com.v2ray.ang.R
 import com.v2ray.ang.extension.toast
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import io.github.du10777.tropa.data.ConnectionLog
+import io.github.du10777.tropa.data.LogLevel
 import io.github.du10777.tropa.data.ProblemReports
 import io.github.du10777.tropa.service.ProbeEvent
 import io.github.du10777.tropa.service.WatchStateStore
+import io.github.du10777.tropa.ui.common.ChoiceDialog
 import io.github.du10777.tropa.ui.common.ConfirmDialog
 import io.github.du10777.tropa.ui.theme.TropaColors
 import io.github.du10777.tropa.ui.theme.TropaTheme
@@ -108,9 +114,21 @@ object LogActions {
         ConnectionLog.clear(context)
         context.toast(R.string.tropa_log_cleared)
     }
+
+    /** The VPN service reads the level on every entry, so the change applies at once. */
+    fun setLevel(context: Context, level: LogLevel) {
+        if (level == ConnectionLog.level) return
+        ConnectionLog.level = level
+        ConnectionLog.append(context, ProbeEvent(System.currentTimeMillis(), "level", "", null, level.name, ok = true))
+    }
+
+    fun setLimit(context: Context, kb: Int) {
+        ConnectionLog.limitKb = kb
+        ConnectionLog.trimToLimit(context)
+    }
 }
 
-/** The whole connection log, newest first, with copy, share and clear. */
+/** The whole connection log, newest first, with its level and size, copy, share and clear. */
 class TropaLogActivity : BaseComponentActivity() {
 
     @Composable
@@ -120,7 +138,11 @@ class TropaLogActivity : BaseComponentActivity() {
             var events by remember { mutableStateOf<List<ProbeEvent>>(emptyList()) }
             var size by remember { mutableLongStateOf(0L) }
             var refresh by remember { mutableLongStateOf(0L) }
+            var level by remember { mutableStateOf(ConnectionLog.level) }
+            var limitKb by remember { mutableIntStateOf(ConnectionLog.limitKb) }
             var confirmClear by remember { mutableStateOf(false) }
+            var choosingLevel by remember { mutableStateOf(false) }
+            var choosingSize by remember { mutableStateOf(false) }
             LaunchedEffect(refresh) {
                 var seen: Pair<Long, Long>? = null
                 while (true) {
@@ -164,16 +186,26 @@ class TropaLogActivity : BaseComponentActivity() {
                             Icon(painterResource(R.drawable.ic_delete_24dp), contentDescription = stringResource(R.string.tropa_log_clear))
                         }
                     }
-                    Text(
-                        stringResource(
-                            R.string.tropa_log_size,
-                            ConnectionLog.sizeLabel(context, size),
-                            ConnectionLog.sizeLabel(context, ConnectionLog.limitKb * 1024L),
-                        ),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        Column {
+                            LogSettingRow(stringResource(R.string.tropa_log_level), stringResource(level.title)) { choosingLevel = true }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.background, modifier = Modifier.padding(horizontal = 14.dp))
+                            LogSettingRow(
+                                stringResource(R.string.tropa_log_size_title),
+                                stringResource(
+                                    R.string.tropa_log_size,
+                                    ConnectionLog.sizeLabel(context, size),
+                                    ConnectionLog.sizeLabel(context, limitKb * 1024L),
+                                ),
+                            ) { choosingSize = true }
+                        }
+                    }
                     if (events.isEmpty()) {
                         Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                             Text(stringResource(R.string.tropa_log_empty), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
@@ -199,31 +231,91 @@ class TropaLogActivity : BaseComponentActivity() {
                     onDismiss = { confirmClear = false },
                 )
             }
+            if (choosingLevel) {
+                ChoiceDialog(
+                    title = stringResource(R.string.tropa_log_level),
+                    hint = null,
+                    options = LogLevel.entries,
+                    selected = level,
+                    label = { context.getString(it.title) },
+                    note = { context.getString(it.hint) },
+                    onSelect = {
+                        LogActions.setLevel(context, it)
+                        level = it
+                        choosingLevel = false
+                    },
+                    onDismiss = { choosingLevel = false },
+                )
+            }
+            if (choosingSize) {
+                ChoiceDialog(
+                    title = stringResource(R.string.tropa_log_size_title),
+                    hint = stringResource(R.string.tropa_log_size_hint),
+                    options = ConnectionLog.LIMIT_CHOICES_KB,
+                    selected = limitKb,
+                    label = { ConnectionLog.sizeLabel(context, it * 1024L) },
+                    onSelect = {
+                        LogActions.setLimit(context, it)
+                        limitKb = it
+                        choosingSize = false
+                        refresh++
+                    },
+                    onDismiss = { choosingSize = false },
+                )
+            }
         }
     }
 }
 
-/** One log line: session markers stand out, checks show server, address and result. */
+/** A setting of the log: name on the left, value and an arrow on the right. */
+@Composable
+private fun LogSettingRow(title: String, value: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(value, fontSize = 14.sp, color = TropaColors.BrandDark, fontWeight = FontWeight.SemiBold)
+        Icon(
+            painterResource(R.drawable.tropa_ic_chevron_right),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** One log line: session markers stand out, notes are quiet, checks show server, address and result. */
 @Composable
 fun LogEntry(e: ProbeEvent) {
     val context = LocalContext.current
     val time = remember { SimpleDateFormat("dd.MM HH:mm:ss", Locale.ROOT) }
+    val headline = "${time.format(Date(e.at))} · ${ConnectionLog.title(context, e)}" + (if (e.server.isNotEmpty()) " · ${e.server}" else "")
     if (e.kind in ConnectionLog.SESSION_KINDS) {
         val color = when (e.kind) {
             "connected", "start" -> TropaColors.Connected
             "switch" -> TropaColors.BrandDark
-            "stop", "reload" -> TropaColors.Idle
+            "stop", "reload", "servers", "level" -> TropaColors.Idle
+            "network" -> if (e.target == "none") TropaColors.Problem else TropaColors.Idle
             else -> TropaColors.Problem
         }
         Surface(shape = RoundedCornerShape(10.dp), color = color.copy(alpha = 0.12f), modifier = Modifier.fillMaxWidth()) {
-            Text(
-                "${time.format(Date(e.at))} · ${ConnectionLog.kindLabel(context, e.kind)}" +
-                    (if (e.server.isNotEmpty()) " · ${e.server}" else ""),
-                color = color,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            )
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Text(headline, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                e.detail?.takeIf { it.isNotEmpty() }?.let { Text(it, color = color, fontSize = 12.sp) }
+            }
+        }
+        return
+    }
+    if (e.kind in ConnectionLog.NOTE_KINDS) {
+        Column(Modifier.padding(start = 16.dp)) {
+            Text(headline, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            e.detail?.takeIf { it.isNotEmpty() }?.let {
+                Text(it, fontSize = 11.sp, lineHeight = 14.sp, fontFamily = FontFamily.Monospace, color = if (e.ok) MaterialTheme.colorScheme.onSurfaceVariant else TropaColors.Problem)
+            }
         }
         return
     }
@@ -237,12 +329,7 @@ fun LogEntry(e: ProbeEvent) {
         )
         Spacer(Modifier.width(8.dp))
         Column {
-            Text(
-                "${time.format(Date(e.at))} · ${ConnectionLog.kindLabel(context, e.kind)}" +
-                    (if (e.server.isNotEmpty()) " · ${e.server}" else ""),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Text(headline, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             e.address?.takeIf { it.isNotEmpty() && e.server.isNotEmpty() && it !in e.server }?.let {
                 Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -257,6 +344,8 @@ fun LogEntry(e: ProbeEvent) {
             if (result.isNotEmpty()) {
                 Text(result, fontSize = 12.sp, color = if (e.ok) TropaColors.Connected else TropaColors.Problem)
             }
+            e.detail?.takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }
+

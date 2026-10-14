@@ -22,6 +22,19 @@ class LinkParserTest {
     }
 
     @Test
+    fun `only xsub links are offered from the clipboard`() {
+        assertEquals(
+            "https://example.com/i/AbC123",
+            LinkParser.findTropaLink("Вот ссылка: xsub://ZXhhbXBsZS5jb20vaS9BYkMxMjM, вставь в Тропу")?.url,
+        )
+        assertNull(LinkParser.findTropaLink("https://domain.com"))
+        assertNull(LinkParser.findTropaLink("https://domain.com/sub/abc"))
+        assertNull(LinkParser.findTropaLink("vless://uuid@host:443?type=tcp#x"))
+        assertNull(LinkParser.findTropaLink("xsub://!!!"))
+        assertNull(LinkParser.findTropaLink(null))
+    }
+
+    @Test
     fun `xsub accepts the standard alphabet, padding and an explicit scheme`() {
         val payload = Base64Codec.encodeUrlSafe("http://10.0.0.1:2096/sub/abc?x=1".toByteArray())
         val padded = payload + "=".repeat((4 - payload.length % 4) % 4)

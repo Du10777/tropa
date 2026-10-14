@@ -167,7 +167,7 @@
     <string name="tropa_log_clear_confirm">Clear the connection log?</string>
     <string name="tropa_log_copied">The log is copied</string>
     <string name="tropa_log_cleared">The log is cleared</string>
-    <string name="tropa_log_size">Size: %1$s of %2$s, older entries are removed automatically</string>
+    <string name="tropa_log_size">%1$s of %2$s</string>
     <string name="tropa_log_start">VPN turned on</string>
     <string name="tropa_log_stop">VPN turned off</string>
     <string name="tropa_log_connected">Connected</string>
@@ -176,6 +176,28 @@
     <string name="tropa_log_switch">New connections go through</string>
     <string name="tropa_size_kb">%1$s KB</string>
     <string name="tropa_size_mb">%1$s MB</string>
-    <string name="tropa_settings_log_size">Connection log size</string>
-    <string name="tropa_settings_log_size_hint">When the log grows bigger, the oldest entries are removed.</string>
+
+    <!-- 0.6: log levels -->
+    <string name="tropa_log_level">Log level</string>
+    <string name="tropa_log_level_changed">Log level: %1$s</string>
+    <string name="tropa_log_level_errors">Errors only</string>
+    <string name="tropa_log_level_errors_hint">Failed checks and connection events</string>
+    <string name="tropa_log_level_normal">Normal</string>
+    <string name="tropa_log_level_normal_hint">Plus successful checks; while everything works, once in 10 minutes</string>
+    <string name="tropa_log_level_verbose">Verbose</string>
+    <string name="tropa_log_level_verbose_hint">Every check of every server, network details and the server list</string>
+    <string name="tropa_log_level_debug">Debug</string>
+    <string name="tropa_log_level_debug_hint">Everything: each check address with its response code, the screen, Xray core messages. For troubleshooting: the log grows fast</string>
+    <string name="tropa_log_size_title">Log size</string>
+    <string name="tropa_log_size_hint">When the log grows bigger, the oldest entries are removed.</string>
+    <string name="tropa_log_network">Network: %1$s</string>
+    <string name="tropa_network_wifi">Wi-Fi</string>
+    <string name="tropa_network_cellular">mobile</string>
+    <string name="tropa_network_ethernet">Ethernet</string>
+    <string name="tropa_network_none">none</string>
+    <string name="tropa_network_other">other</string>
+    <string name="tropa_log_servers">Servers</string>
+    <string name="tropa_log_screen_on">Screen on</string>
+    <string name="tropa_log_screen_off">Screen off</string>
+    <string name="tropa_log_core">Xray core</string>
 </resources>

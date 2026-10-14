@@ -31,10 +31,14 @@ data class WatchNode(
     val active: Boolean,
 )
 
-/** One check made by the watchdog, for the details screen and problem reports. */
+/** One entry of the connection log: a check made by the watchdog or a session event. */
 data class ProbeEvent(
     val at: Long,
-    /** latency | download | direct | reload | start | stop | connected | no_server | no_internet | switch */
+    /**
+     * Checks: latency | download | direct. Session: start | stop | connected | no_server |
+     * no_internet | reload | switch. Details: network (target = wifi | cellular | ethernet | none |
+     * other, ok = validated by Android) | servers | screen_on | screen_off | core (Xray message).
+     */
     val kind: String,
     val server: String,
     val address: String?,
@@ -43,6 +47,8 @@ data class ProbeEvent(
     val latencyMs: Long = 0,
     val bytes: Long = 0,
     val error: String? = null,
+    /** Extra facts: HTTP status, network details, the Xray message. */
+    val detail: String? = null,
 )
 
 data class WatchState(

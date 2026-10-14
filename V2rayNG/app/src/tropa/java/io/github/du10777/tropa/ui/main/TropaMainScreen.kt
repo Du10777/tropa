@@ -318,6 +318,10 @@ private fun rememberNow(): Long {
 /** What the status block shows: colours, title and hint. */
 private enum class StatusLook { IDLE, PROGRESS, GOOD, BAD }
 
+/** The VPN is on, but no channel works yet: Tropa keeps trying (no server answers or no internet). */
+private fun reconnecting(state: MainUiState): Boolean =
+    state.core == CoreState.Running && state.watch?.phase.let { it == WatchPhase.NO_SERVER || it == WatchPhase.NO_INTERNET }
+
 private fun statusLook(state: MainUiState): StatusLook = when (state.core) {
     CoreState.Starting -> StatusLook.PROGRESS
     CoreState.Failed -> StatusLook.BAD
@@ -411,8 +415,7 @@ private fun StatusBlock(state: MainUiState, onClick: (() -> Unit)? = null) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val reconnecting = state.core == CoreState.Running && watch?.phase == WatchPhase.NO_SERVER
-            if (look == StatusLook.PROGRESS || reconnecting) {
+            if (look == StatusLook.PROGRESS || reconnecting(state)) {
                 CircularProgressIndicator(color = accent, strokeWidth = 3.dp, modifier = Modifier.size(18.dp))
             } else {
                 Box(
@@ -501,9 +504,9 @@ private fun ConnectionCard(connection: Connection, state: MainUiState, actions: 
                     Text(cardSubtitle(connection), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.width(12.dp))
-                // Like OpenVPN Connect: while connecting and checking the switch turns into an
-                // outlined pill with a spinner and cannot be tapped.
-                if (statusLook(state) == StatusLook.PROGRESS) {
+                // Like OpenVPN Connect: while connecting, checking and reconnecting the switch turns
+                // into an outlined pill with a spinner; tapping it cancels.
+                if (statusLook(state) == StatusLook.PROGRESS || reconnecting(state)) {
                     ConnectingSwitch(TropaColors.Checking, onCancel = { actions.onToggle(false) })
                 } else {
                     Switch(
