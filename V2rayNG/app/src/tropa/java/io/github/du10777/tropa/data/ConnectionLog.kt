@@ -176,7 +176,7 @@ object ConnectionLog {
     }
 
     /** Events that mark sessions and changes rather than checks: shown as chips. */
-    val SESSION_KINDS = setOf("start", "stop", "connected", "no_server", "no_internet", "reload", "switch", "network", "servers", "level")
+    val SESSION_KINDS = setOf("start", "stop", "connected", "no_server", "no_internet", "reload", "switch", "network", "servers", "level", "subscription")
 
     /** Small notes: shown as plain grey lines. */
     val NOTE_KINDS = setOf("screen_on", "screen_off", "core")
@@ -219,6 +219,7 @@ object ConnectionLog {
             "screen_on" -> R.string.tropa_log_screen_on
             "screen_off" -> R.string.tropa_log_screen_off
             "core" -> R.string.tropa_log_core
+            "subscription" -> R.string.tropa_log_subscription
             else -> R.string.tropa_log_reload
         }
     )

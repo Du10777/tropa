@@ -201,6 +201,7 @@ object Connections {
         item.lastUpdated = System.currentTimeMillis()
         MmkvManager.encodeSubscription(id, item)
         saveHeaders(id, fetched.headers)
+        TropaPrefs.setSubscriptionHash(id, bodyHash(fetched.body))
         return AddResult.Added(id)
     }
 
@@ -223,24 +224,36 @@ object Connections {
         return AddResult.Added(id)
     }
 
-    /** Re-downloads a subscription connection. Blocking: call off the main thread. */
-    fun refresh(id: String): Boolean {
-        val item = MmkvManager.decodeSubscription(id) ?: return false
-        if (item.url.isEmpty()) return false
+    enum class Refresh { UPDATED, UNCHANGED, FAILED }
+
+    /**
+     * Re-downloads a subscription connection. Blocking: call off the main thread. With [keepIfSame]
+     * an unchanged server list is not imported again, so the profiles keep their ids (an import
+     * recreates them, and the profile to start must be picked again).
+     */
+    fun refresh(id: String, keepIfSame: Boolean = false): Refresh {
+        val item = MmkvManager.decodeSubscription(id) ?: return Refresh.FAILED
+        if (item.url.isEmpty()) return Refresh.FAILED
         val fetched = try {
             SubscriptionFetcher.fetch(item.url)
         } catch (e: Exception) {
             LogUtil.e(TAG, "Failed to refresh subscription", e)
-            return false
+            return Refresh.FAILED
         }
-        if (!importServers(fetched.body, id)) return false
+        val hash = bodyHash(fetched.body)
+        val same = keepIfSame && hash == TropaPrefs.subscriptionHash(id)
+        if (!same && !importServers(fetched.body, id)) return Refresh.FAILED
+        TropaPrefs.setSubscriptionHash(id, hash)
         item.lastUpdated = System.currentTimeMillis()
         SubscriptionInfo.decodeTitle(fetched.headers["profile-title"])?.let { item.remarks = it }
         fetched.headers["profile-update-interval"]?.let { item.updateInterval = updateIntervalMinutes(it) }
         MmkvManager.encodeSubscription(id, item)
         saveHeaders(id, fetched.headers)
-        return true
+        return if (same) Refresh.UNCHANGED else Refresh.UPDATED
     }
+
+    private fun bodyHash(body: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(body.toByteArray()).joinToString("") { "%02x".format(it) }
 
     /** The response headers Tropa shows or uses (lower-case names). */
     private fun saveHeaders(id: String, headers: Map<String, String>) {

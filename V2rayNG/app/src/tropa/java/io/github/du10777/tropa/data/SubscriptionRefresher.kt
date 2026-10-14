@@ -1,38 +1,26 @@
 package io.github.du10777.tropa.data
 
 import android.content.Context
-import androidx.work.Constraints
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.WorkerParameters
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.util.LogUtil
-import java.util.concurrent.TimeUnit
 
 /**
- * Tropa updates its subscriptions itself, instead of upstream's updater: the device headers go out
- * (X-HWID for panels that limit devices) and the response headers are kept (traffic and expiry,
- * title, announce, support and report addresses). Each subscription is due after its
- * Profile-Update-Interval (12 h by default); an hourly job and every start of Tropa refresh the due ones.
+ * Tropa updates its subscriptions itself, and only while the user keeps the VPN on: nothing goes
+ * to the subscription server while Tropa is off. The watchdog asks for the due ones when the
+ * connection comes up and then every half an hour; a subscription is due after its
+ * Profile-Update-Interval (12 h by default). Its own requests carry the device headers (X-HWID)
+ * and keep the response headers (traffic and expiry, title, announce, support and report addresses).
  */
 object SubscriptionRefresher {
     private const val TAG = "TropaSubscriptions"
-    private const val WORK = "tropa-subscriptions"
 
-    fun schedule(context: Context) {
-        takeOverFromUpstream()
-        val request = PeriodicWorkRequestBuilder<TropaSubscriptionWorker>(1, TimeUnit.HOURS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.KEEP, request)
-    }
+    /** 0.8.0 updated subscriptions from WorkManager, in the background, even with the VPN off. */
+    private const val OLD_WORK = "tropa-subscriptions"
 
-    /** Connections added before 0.8 were left to upstream's updater; its jobs are cancelled. */
-    private fun takeOverFromUpstream() {
+    /** Takes the subscriptions over from upstream's updater (and drops the 0.8.0 background job). */
+    fun takeOver(context: Context) {
         MmkvManager.decodeSubscriptions()
             .filter { it.subscription.autoUpdate && it.subscription.url.isNotEmpty() }
             .forEach { cache ->
@@ -40,24 +28,33 @@ object SubscriptionRefresher {
                 MmkvManager.encodeSubscription(cache.guid, cache.subscription)
                 SubscriptionUpdater.syncOne(subId = cache.guid)
             }
+        runCatching { WorkManager.getInstance(context).cancelUniqueWork(OLD_WORK) }
     }
 
     fun isDue(lastUpdated: Long, intervalMinutes: Long, now: Long): Boolean =
         now - lastUpdated >= intervalMinutes.coerceAtLeast(15) * 60_000L
 
-    /** Refreshes the subscriptions whose time has come; returns how many were updated. Blocking. */
+    /** Refreshes the subscriptions whose time has come; returns how many were downloaded. Blocking. */
     fun refreshDue(now: Long = System.currentTimeMillis()): Int = MmkvManager.decodeSubscriptions()
         .filter { it.subscription.url.isNotEmpty() && isDue(it.subscription.lastUpdated, it.subscription.updateInterval, now) }
-        .count { cache ->
-            Connections.refresh(cache.guid).also { ok ->
-                LogUtil.i(TAG, "subscription ${cache.subscription.remarks}: ${if (ok) "updated" else "update failed"}")
-            }
-        }
-}
+        .count { refresh(it.guid) != Connections.Refresh.FAILED }
 
-class TropaSubscriptionWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        SubscriptionRefresher.refreshDue()
-        return Result.success()
+    /** The active connection right now, whatever its interval (servers silent: maybe they moved). */
+    fun refreshActive(): Connections.Refresh =
+        Connections.activeId()?.let(::refresh) ?: Connections.Refresh.FAILED
+
+    /**
+     * Refreshes one subscription; an unchanged one keeps its profiles. A changed one gets new
+     * profile ids, so for the active connection the profile to start is picked again: a later
+     * reconnect must not look for one that is gone. The running core keeps its config until the
+     * next start.
+     */
+    fun refresh(id: String): Connections.Refresh {
+        val result = Connections.refresh(id, keepIfSame = true)
+        LogUtil.i(TAG, "subscription $id: $result")
+        if (result == Connections.Refresh.UPDATED && id == Connections.activeId()) {
+            Connections.serverToStart(id)?.let(MmkvManager::setSelectServer)
+        }
+        return result
     }
 }

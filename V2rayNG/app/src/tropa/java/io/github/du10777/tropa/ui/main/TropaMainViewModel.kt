@@ -69,11 +69,8 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
         // The upstream main screen copies geoip.dat / geosite.dat from the APK; without them configs
         // with geoip:/geosite: rules do not start. Tropa's screen replaces it, so it copies them too.
         viewModelScope.launch(Dispatchers.IO) { SettingsManager.initAssets(app, app.assets) }
-        // Tropa's own subscription updates: hourly, plus the due ones right now.
-        SubscriptionRefresher.schedule(app)
-        viewModelScope.launch(Dispatchers.IO) {
-            if (SubscriptionRefresher.refreshDue() > 0) withContext(Dispatchers.Main) { reload() }
-        }
+        // Subscriptions are updated by Tropa itself, only while the VPN is on (see SubscriptionRefresher).
+        SubscriptionRefresher.takeOver(app)
         viewModelScope.launch {
             combine(monitor.state, monitor.lastError, monitor.watch) { core, error, watch -> Triple(core, error, watch) }
                 .collect { (core, error, watch) ->

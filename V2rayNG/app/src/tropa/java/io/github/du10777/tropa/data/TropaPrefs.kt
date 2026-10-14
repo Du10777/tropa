@@ -20,6 +20,7 @@ object TropaPrefs {
     private const val ANNOUNCE_DISMISSED = "tropa_announce_dismissed_"
     private const val SUPPORT_URL = "tropa_support_url_"
     private const val WEB_PAGE_URL = "tropa_web_page_url_"
+    private const val SUBSCRIPTION_HASH = "tropa_subscription_hash_"
 
     var localeInitialized: Boolean
         get() = MmkvManager.decodeSettingsBool(LOCALE_INITIALIZED, false)
@@ -81,6 +82,13 @@ object TropaPrefs {
 
     fun setSubscriptionInfo(connectionId: String, value: String?) {
         MmkvManager.encodeSettings(SUBSCRIPTION_INFO + connectionId, value.orEmpty())
+    }
+
+    /** Hash of the last downloaded subscription body: an unchanged one is not imported again. */
+    fun subscriptionHash(connectionId: String): String? = MmkvManager.decodeSettingsString(SUBSCRIPTION_HASH + connectionId)
+
+    fun setSubscriptionHash(connectionId: String, value: String) {
+        MmkvManager.encodeSettings(SUBSCRIPTION_HASH + connectionId, value)
     }
 
     /** `Announce` subscription header (already decoded): a message from the server to its users. */

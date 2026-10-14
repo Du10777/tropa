@@ -233,4 +233,5 @@
     <!-- 0.8: subscription links -->
     <string name="tropa_connection_support">Поддержка</string>
     <string name="tropa_connection_web_page">Страница подписки</string>
+    <string name="tropa_log_subscription">Подписка обновилась, перезапуск</string>
 </resources>

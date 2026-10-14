@@ -29,6 +29,7 @@ import io.github.du10777.tropa.data.NodePlan
 import io.github.du10777.tropa.data.NodePlanner
 import io.github.du10777.tropa.data.NodeSelector
 import io.github.du10777.tropa.data.ProblemReports
+import io.github.du10777.tropa.data.SubscriptionRefresher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -104,6 +105,9 @@ object TropaWatchdog {
 
     /** How often the core log reader follows log level changes. */
     private const val CORE_LOG_POLL_MS = 3_000L
+
+    /** While connected, due subscriptions are looked for this often (and when the connection comes up). */
+    private const val SUBSCRIPTION_CHECK_MS = 30 * 60_000L
 
     private var scope: CoroutineScope? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -290,6 +294,9 @@ object TropaWatchdog {
         private var phase = WatchPhase.CHECKING
         private var connectedAt = 0L
         private var reportSaved = false
+
+        /** The active subscription was downloaded again during this outage (servers may have moved). */
+        private var subscriptionRetried = false
         /** Last outcome and last written check of each server, to keep steady periods short in the log. */
         private val lastOutcome = ConcurrentHashMap<String, Boolean>()
         private val lastWrittenAt = ConcurrentHashMap<String, Long>()
@@ -309,6 +316,7 @@ object TropaWatchdog {
             lastNetwork = null
             logNetwork(context)
             scope.launch { captureCore() }
+            scope.launch { refreshSubscriptions() }
             loadPlan()
             var attempt = 0
             while (currentCoroutineContext().isActive) {
@@ -339,6 +347,14 @@ object TropaWatchdog {
                 if (attempt >= REPORT_AFTER_ATTEMPTS && !reportSaved) {
                     reportSaved = ProblemReports.save(context, currentState(WatchPhase.NO_SERVER, attempt, 0L))
                 }
+                if (attempt >= REPORT_AFTER_ATTEMPTS && !subscriptionRetried) {
+                    subscriptionRetried = true
+                    // The servers may have moved: a changed subscription is worth a full restart.
+                    if (SubscriptionRefresher.refreshActive() == Connections.Refresh.UPDATED) {
+                        record(ProbeEvent(System.currentTimeMillis(), "subscription", "", null, "", ok = true))
+                        LauncherManager.restartService(context)
+                    }
+                }
                 waitForWake(pauseMs)
                 record(ProbeEvent(System.currentTimeMillis(), "reload", "", null, "", ok = true))
                 connectedAt = 0L
@@ -363,6 +379,14 @@ object TropaWatchdog {
             if (ConnectionLog.level >= LogLevel.VERBOSE) {
                 val names = plan.nodes.joinToString(", ") { it.name.ifEmpty { it.tag.ifEmpty { "?" } } }
                 record(ProbeEvent(System.currentTimeMillis(), "servers", "", null, "", ok = true, detail = names + (if (plan.balancerTag != null) " · balancer" else "")))
+            }
+        }
+
+        /** Subscriptions are updated only while the VPN is on: every half an hour, when connected. */
+        private suspend fun refreshSubscriptions() {
+            while (currentCoroutineContext().isActive) {
+                delay(SUBSCRIPTION_CHECK_MS)
+                if (phase == WatchPhase.CONNECTED) runCatching { SubscriptionRefresher.refreshDue() }
             }
         }
 
@@ -670,6 +694,8 @@ object TropaWatchdog {
 
         private fun onConnected() {
             if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
+            subscriptionRetried = false
+            scope.launch { runCatching { SubscriptionRefresher.refreshDue() } }
             if (reportSaved || ProblemReports.hasPending(context)) {
                 reportSaved = false
                 scope.launch { ProblemReports.uploadPending(context) }

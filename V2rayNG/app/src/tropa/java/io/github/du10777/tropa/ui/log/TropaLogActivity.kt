@@ -331,7 +331,7 @@ fun LogEntry(e: ProbeEvent) {
     if (e.kind in ConnectionLog.SESSION_KINDS) {
         val color = when (e.kind) {
             "connected", "start" -> TropaColors.Connected
-            "switch" -> TropaColors.BrandDark
+            "switch", "subscription" -> TropaColors.BrandDark
             "stop", "reload", "servers", "level" -> TropaColors.Idle
             "network" -> if (e.target == "none") TropaColors.Problem else TropaColors.Idle
             else -> TropaColors.Problem

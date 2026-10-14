@@ -143,7 +143,7 @@ class TropaConnectionsActivity : BaseComponentActivity() {
         if (refreshing != null) return
         refreshing = connection.id
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { Connections.refresh(connection.id) }
+            val ok = withContext(Dispatchers.IO) { Connections.refresh(connection.id) != Connections.Refresh.FAILED }
             refreshing = null
             toast(if (ok) R.string.tropa_connection_updated else R.string.tropa_connection_update_failed)
             reload()

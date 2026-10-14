@@ -267,7 +267,7 @@ class TropaMainActivity : HelperBaseComponentActivity() {
         val id = viewModel.state.value.active?.id ?: return
         val running = viewModel.state.value.core == CoreState.Running
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { Connections.refresh(id) }
+            val ok = withContext(Dispatchers.IO) { Connections.refresh(id) != Connections.Refresh.FAILED }
             toast(if (ok) R.string.tropa_connection_updated else R.string.tropa_connection_update_failed)
             viewModel.reload()
             // An update recreates the server profiles: restart on the fresh ones.

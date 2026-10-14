@@ -234,4 +234,5 @@
     <!-- 0.8: subscription links -->
     <string name="tropa_connection_support">Support</string>
     <string name="tropa_connection_web_page">Subscription page</string>
+    <string name="tropa_log_subscription">Subscription updated, restarting</string>
 </resources>
