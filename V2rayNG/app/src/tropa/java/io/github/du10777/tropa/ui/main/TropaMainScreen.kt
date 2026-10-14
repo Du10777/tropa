@@ -3,6 +3,15 @@ package io.github.du10777.tropa.ui.main
 import android.text.format.Formatter
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -470,20 +479,19 @@ private fun ConnectionCard(connection: Connection, state: MainUiState, actions: 
                     Text(cardSubtitle(connection), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.width(12.dp))
-                // Like OpenVPN Connect: the switch is inactive while connecting and checking.
-                val connecting = statusLook(state) == StatusLook.PROGRESS
-                Switch(
-                    checked = switchOn,
-                    onCheckedChange = actions.onToggle,
-                    enabled = !state.busy && !connecting,
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = accent,
-                        checkedThumbColor = Color.White,
-                        disabledCheckedTrackColor = accent.copy(alpha = 0.38f),
-                        disabledCheckedThumbColor = Color.White,
-                    ),
-                    modifier = Modifier.scale(1.3f),
-                )
+                // Like OpenVPN Connect: while connecting and checking the switch turns into an
+                // outlined pill with a spinner and cannot be tapped.
+                if (statusLook(state) == StatusLook.PROGRESS) {
+                    ConnectingSwitch(TropaColors.Checking)
+                } else {
+                    Switch(
+                        checked = switchOn,
+                        onCheckedChange = actions.onToggle,
+                        enabled = !state.busy,
+                        colors = SwitchDefaults.colors(checkedTrackColor = accent, checkedThumbColor = Color.White),
+                        modifier = Modifier.scale(1.3f),
+                    )
+                }
                 Spacer(Modifier.width(6.dp))
             }
             val info = connection.info
@@ -685,6 +693,41 @@ private fun ProfileBlock(profile: ProfileDetails, watch: WatchState?) {
                         Surface(shape = CircleShape, color = TropaColors.Brand, modifier = Modifier.size(8.dp)) {}
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Inactive switch shown while connecting: outlined pill and rotating dots where the thumb would be. */
+@Composable
+private fun ConnectingSwitch(color: Color) {
+    val rotation by rememberInfiniteTransition(label = "connecting").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 1000, easing = LinearEasing)),
+        label = "spinner",
+    )
+    Box(
+        modifier = Modifier
+            .size(width = 68.dp, height = 42.dp)
+            .border(3.dp, color, RoundedCornerShape(21.dp)),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Canvas(
+            Modifier
+                .padding(end = 9.dp)
+                .size(24.dp)
+                .rotate(rotation)
+        ) {
+            val dots = 8
+            val radius = size.minDimension / 2 - 3.dp.toPx()
+            for (i in 0 until dots) {
+                val angle = Math.toRadians(i * 360.0 / dots)
+                drawCircle(
+                    color = color.copy(alpha = (i + 1f) / dots),
+                    radius = 2.6.dp.toPx(),
+                    center = Offset(center.x + radius * kotlin.math.cos(angle).toFloat(), center.y + radius * kotlin.math.sin(angle).toFloat()),
+                )
             }
         }
     }
