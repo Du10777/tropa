@@ -208,4 +208,11 @@
     <string name="tropa_route_ports">ports: %1$s</string>
     <string name="tropa_route_protocols">protocols: %1$s</string>
     <string name="tropa_geo_select_hint">Touch and hold a subnet to select and copy it</string>
+
+    <!-- 0.7: sending the log -->
+    <string name="tropa_log_send">Send to the server</string>
+    <string name="tropa_log_sending">Sending…</string>
+    <string name="tropa_log_sent">The log is sent to the server</string>
+    <string name="tropa_log_send_no_server">The server of this connection does not accept logs</string>
+    <string name="tropa_log_send_failed">Could not send (%1$s). The log will go to the server when the connection is back</string>
 </resources>

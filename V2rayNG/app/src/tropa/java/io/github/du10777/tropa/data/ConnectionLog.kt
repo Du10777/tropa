@@ -123,6 +123,22 @@ object ConnectionLog {
         }
     }.getOrDefault(emptyList())
 
+    /** The newest events that fit into [maxBytes] of the file, oldest first (for reports). */
+    fun readTail(context: Context, maxBytes: Long): List<ProbeEvent> = runCatching {
+        locked(context) { f ->
+            if (!f.exists()) return@locked emptyList()
+            RandomAccessFile(f, "r").use { raf ->
+                val start = (raf.length() - maxBytes).coerceAtLeast(0)
+                val bytes = ByteArray((raf.length() - start).toInt())
+                raf.seek(start)
+                raf.readFully(bytes)
+                // A cut line at the start is dropped; the JSON parser would refuse it anyway.
+                bytes.toString(Charsets.UTF_8).split('\n').drop(if (start > 0) 1 else 0)
+                    .mapNotNull { line -> line.takeIf { it.isNotBlank() }?.let { runCatching { gson.fromJson(it, ProbeEvent::class.java) }.getOrNull() } }
+            }
+        }
+    }.getOrDefault(emptyList())
+
     /** Sizes in the binary units the limits are set in: 47 KB, 1 MB, 1.5 MB. */
     fun sizeLabel(context: Context, bytes: Long): String {
         val kb = bytes / 1024.0

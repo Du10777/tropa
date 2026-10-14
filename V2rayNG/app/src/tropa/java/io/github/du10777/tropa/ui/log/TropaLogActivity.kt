@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -115,6 +117,19 @@ object LogActions {
         context.toast(R.string.tropa_log_cleared)
     }
 
+    /** Sends the whole log to the server of the connection; [onDone] runs when it is over. */
+    fun sendToServer(context: Context, onDone: () -> Unit) {
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { ProblemReports.sendNow(context.applicationContext, WatchStateStore.read()) }
+            when (result) {
+                ProblemReports.SendResult.Sent -> context.toast(R.string.tropa_log_sent)
+                ProblemReports.SendResult.NoServer -> context.toast(R.string.tropa_log_send_no_server, long = true)
+                is ProblemReports.SendResult.Failed -> context.toast(context.getString(R.string.tropa_log_send_failed, result.reason), long = true)
+            }
+            onDone()
+        }
+    }
+
     /** The VPN service reads the level on every entry, so the change applies at once. */
     fun setLevel(context: Context, level: LogLevel) {
         if (level == ConnectionLog.level) return
@@ -143,6 +158,7 @@ class TropaLogActivity : BaseComponentActivity() {
             var confirmClear by remember { mutableStateOf(false) }
             var choosingLevel by remember { mutableStateOf(false) }
             var choosingSize by remember { mutableStateOf(false) }
+            var sending by remember { mutableStateOf(false) }
             LaunchedEffect(refresh) {
                 var seen: Pair<Long, Long>? = null
                 while (true) {
@@ -205,6 +221,24 @@ class TropaLogActivity : BaseComponentActivity() {
                                 ),
                             ) { choosingSize = true }
                         }
+                    }
+                    FilledTonalButton(
+                        onClick = {
+                            sending = true
+                            LogActions.sendToServer(context) { sending = false }
+                        },
+                        enabled = !sending,
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = TropaColors.Brand.copy(alpha = 0.22f),
+                            contentColor = TropaColors.BrandDark,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                    ) {
+                        Icon(painterResource(R.drawable.tropa_ic_upload), contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(if (sending) R.string.tropa_log_sending else R.string.tropa_log_send))
                     }
                     if (events.isEmpty()) {
                         Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {

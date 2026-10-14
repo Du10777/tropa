@@ -207,4 +207,11 @@
     <string name="tropa_route_ports">порты: %1$s</string>
     <string name="tropa_route_protocols">протоколы: %1$s</string>
     <string name="tropa_geo_select_hint">Нажмите и удерживайте подсеть, чтобы выделить и скопировать</string>
+
+    <!-- 0.7: sending the log -->
+    <string name="tropa_log_send">Отправить на сервер</string>
+    <string name="tropa_log_sending">Отправляю…</string>
+    <string name="tropa_log_sent">Журнал отправлен на сервер</string>
+    <string name="tropa_log_send_no_server">Сервер этого подключения не принимает журналы</string>
+    <string name="tropa_log_send_failed">Не удалось отправить (%1$s). Журнал уйдёт на сервер, когда будет связь</string>
 </resources>
