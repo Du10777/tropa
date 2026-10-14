@@ -111,6 +111,8 @@ class MainActions(
     val onShareLog: () -> Unit = {},
     val onOpenLog: () -> Unit = {},
     val onOpenGeo: (GeoRef) -> Unit = {},
+    val onDismissAnnounce: () -> Unit = {},
+    val onOpenUrl: (String) -> Unit = {},
 )
 
 /**
@@ -222,6 +224,7 @@ private fun AddActions(actions: MainActions, container: Color = MaterialTheme.co
 
 @Composable
 private fun ConnectionContent(state: MainUiState, actions: MainActions) {
+    state.announce?.let { AnnounceBanner(it, actions.onDismissAnnounce) }
     if (state.clipOffer != null) ClipboardBanner(actions)
     val online = state.core == CoreState.Running &&
         (state.watch?.phase == WatchPhase.CONNECTED || state.watch?.phase == WatchPhase.CHECKS_OFF)
@@ -231,6 +234,18 @@ private fun ConnectionContent(state: MainUiState, actions: MainActions) {
     }
     StatusBlock(state, onClick = if (state.active != null) actions.onShowDetails else null)
     state.active?.let { ConnectionCard(it, state, actions) }
+}
+
+@Composable
+private fun AnnounceBanner(text: String, onDismiss: () -> Unit) {
+    Surface(shape = RoundedCornerShape(18.dp), color = TropaColors.Brand.copy(alpha = 0.18f), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text, color = TropaColors.BrandDark, fontSize = 14.sp, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
+            IconButton(onClick = onDismiss) {
+                Icon(painterResource(R.drawable.tropa_ic_close), contentDescription = stringResource(R.string.tropa_dismiss), tint = TropaColors.BrandDark)
+            }
+        }
+    }
 }
 
 @Composable
@@ -485,6 +500,24 @@ private fun ConnectionCard(connection: Connection, state: MainUiState, actions: 
                     actions.onShowDetails()
                 },
             )
+            connection.supportUrl?.let { url ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.tropa_connection_support)) },
+                    onClick = {
+                        menuOpen = false
+                        actions.onOpenUrl(url)
+                    },
+                )
+            }
+            connection.webPageUrl?.let { url ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.tropa_connection_web_page)) },
+                    onClick = {
+                        menuOpen = false
+                        actions.onOpenUrl(url)
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.tropa_connection_delete), color = TropaColors.Problem) },
                 onClick = {

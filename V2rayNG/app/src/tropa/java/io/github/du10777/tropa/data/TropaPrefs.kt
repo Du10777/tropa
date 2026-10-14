@@ -16,6 +16,10 @@ object TropaPrefs {
     private const val PERMISSION_BLOCKED = "tropa_permission_blocked_"
     private const val SUBSCRIPTION_INFO = "tropa_subscription_info_"
     private const val REPORT_URL = "tropa_report_url_"
+    private const val ANNOUNCE = "tropa_announce_"
+    private const val ANNOUNCE_DISMISSED = "tropa_announce_dismissed_"
+    private const val SUPPORT_URL = "tropa_support_url_"
+    private const val WEB_PAGE_URL = "tropa_web_page_url_"
 
     var localeInitialized: Boolean
         get() = MmkvManager.decodeSettingsBool(LOCALE_INITIALIZED, false)
@@ -78,4 +82,31 @@ object TropaPrefs {
     fun setSubscriptionInfo(connectionId: String, value: String?) {
         MmkvManager.encodeSettings(SUBSCRIPTION_INFO + connectionId, value.orEmpty())
     }
+
+    /** `Announce` subscription header (already decoded): a message from the server to its users. */
+    fun announce(connectionId: String): String? = MmkvManager.decodeSettingsString(ANNOUNCE + connectionId)?.takeIf { it.isNotBlank() }
+
+    fun setAnnounce(connectionId: String, value: String?) {
+        MmkvManager.encodeSettings(ANNOUNCE + connectionId, value.orEmpty())
+    }
+
+    /** The announce the user closed (its hash): a new text shows again. */
+    fun dismissedAnnounce(connectionId: String): String? = MmkvManager.decodeSettingsString(ANNOUNCE_DISMISSED + connectionId)
+
+    fun setDismissedAnnounce(connectionId: String, value: String?) {
+        MmkvManager.encodeSettings(ANNOUNCE_DISMISSED + connectionId, value.orEmpty())
+    }
+
+    /** `Support-Url` and `Profile-Web-Page-Url` subscription headers: web, Telegram or mail links only. */
+    fun supportUrl(connectionId: String): String? = link(SUPPORT_URL + connectionId)
+
+    fun webPageUrl(connectionId: String): String? = link(WEB_PAGE_URL + connectionId)
+
+    fun setLinks(connectionId: String, support: String?, webPage: String?) {
+        MmkvManager.encodeSettings(SUPPORT_URL + connectionId, support?.trim().orEmpty())
+        MmkvManager.encodeSettings(WEB_PAGE_URL + connectionId, webPage?.trim().orEmpty())
+    }
+
+    private fun link(key: String): String? = MmkvManager.decodeSettingsString(key)
+        ?.takeIf { url -> listOf("https://", "http://", "tg://", "mailto:").any { url.startsWith(it, ignoreCase = true) } }
 }

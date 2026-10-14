@@ -215,4 +215,23 @@
     <string name="tropa_log_sent">The log is sent to the server</string>
     <string name="tropa_log_send_no_server">The server of this connection does not accept logs</string>
     <string name="tropa_log_send_failed">Could not send (%1$s). The log will go to the server when the connection is back</string>
+
+    <!-- 0.8: local proxy -->
+    <string name="tropa_proxy_title">Local proxy</string>
+    <string name="tropa_proxy_hint">Other apps on this phone (a browser, Telegram) can go online through Tropa: set the proxy 127.0.0.1 and the port below in their settings, SOCKS5 or HTTP. It works while Tropa is connected.</string>
+    <string name="tropa_proxy_enabled">Turn on</string>
+    <string name="tropa_proxy_port">Port</string>
+    <string name="tropa_proxy_address">127.0.0.1:%1$s</string>
+    <string name="tropa_proxy_user">Login</string>
+    <string name="tropa_proxy_pass">Password</string>
+    <string name="tropa_proxy_no_password">Without a login and password any app on the phone can use the proxy</string>
+    <string name="tropa_proxy_generate">Generate</string>
+    <string name="tropa_proxy_copy">Copy</string>
+    <string name="tropa_proxy_copied">Copied</string>
+    <string name="tropa_proxy_saved">Saved. A running VPN reconnects to apply it</string>
+    <string name="tropa_proxy_off">Off</string>
+
+    <!-- 0.8: subscription links -->
+    <string name="tropa_connection_support">Support</string>
+    <string name="tropa_connection_web_page">Subscription page</string>
 </resources>

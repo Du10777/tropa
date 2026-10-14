@@ -8,7 +8,6 @@ import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
-import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import java.net.URI
@@ -22,6 +21,10 @@ data class Connection(
     val serverCount: Int,
     val lastUpdated: Long,
     val info: SubscriptionInfo?,
+    /** From the subscription headers: a message from the server, support and subscription pages. */
+    val announce: String? = null,
+    val supportUrl: String? = null,
+    val webPageUrl: String? = null,
 ) {
     val isSubscription: Boolean get() = url.isNotEmpty()
 }
@@ -51,6 +54,7 @@ object Connections {
     private const val TAG = "Tropa"
     private const val DEFAULT_UPDATE_INTERVAL_MINUTES = 12 * 60L
     private const val MIN_UPDATE_INTERVAL_MINUTES = 15L
+    private const val MAX_ANNOUNCE_CHARS = 500
 
     /** Hidden upstream policy group that balances the plain servers of a connection. */
     private const val POLICY_GROUP_PREFIX = "tropa-pg-"
@@ -65,6 +69,9 @@ object Connections {
                     serverCount = MmkvManager.decodeServerList(cache.guid).count { !it.startsWith(POLICY_GROUP_PREFIX) },
                     lastUpdated = cache.subscription.lastUpdated,
                     info = SubscriptionInfo.parse(TropaPrefs.subscriptionInfo(cache.guid)),
+                    announce = TropaPrefs.announce(cache.guid),
+                    supportUrl = TropaPrefs.supportUrl(cache.guid),
+                    webPageUrl = TropaPrefs.webPageUrl(cache.guid),
                 )
             }
             .filterNot { it.id == AppConfig.DEFAULT_SUBSCRIPTION_ID && it.serverCount == 0 }
@@ -181,7 +188,8 @@ object Connections {
         val item = SubscriptionItem(
             remarks = SubscriptionInfo.decodeTitle(fetched.headers["profile-title"]) ?: hostName(fetched.finalUrl),
             url = fetched.finalUrl,
-            autoUpdate = true,
+            // Tropa updates it itself (SubscriptionRefresher): upstream's updater would drop the headers.
+            autoUpdate = false,
             updateInterval = updateIntervalMinutes(fetched.headers["profile-update-interval"]),
             userAgent = SubscriptionFetcher.userAgent,
         )
@@ -192,9 +200,7 @@ object Connections {
         }
         item.lastUpdated = System.currentTimeMillis()
         MmkvManager.encodeSubscription(id, item)
-        TropaPrefs.setSubscriptionInfo(id, fetched.headers["subscription-userinfo"])
-        TropaPrefs.setReportUrl(id, fetched.headers["tropa-report-url"])
-        SubscriptionUpdater.syncOne(subId = id)
+        saveHeaders(id, fetched.headers)
         return AddResult.Added(id)
     }
 
@@ -232,15 +238,24 @@ object Connections {
         SubscriptionInfo.decodeTitle(fetched.headers["profile-title"])?.let { item.remarks = it }
         fetched.headers["profile-update-interval"]?.let { item.updateInterval = updateIntervalMinutes(it) }
         MmkvManager.encodeSubscription(id, item)
-        TropaPrefs.setSubscriptionInfo(id, fetched.headers["subscription-userinfo"])
-        TropaPrefs.setReportUrl(id, fetched.headers["tropa-report-url"])
+        saveHeaders(id, fetched.headers)
         return true
+    }
+
+    /** The response headers Tropa shows or uses (lower-case names). */
+    private fun saveHeaders(id: String, headers: Map<String, String>) {
+        TropaPrefs.setSubscriptionInfo(id, headers["subscription-userinfo"])
+        TropaPrefs.setReportUrl(id, headers["tropa-report-url"])
+        TropaPrefs.setAnnounce(id, SubscriptionInfo.decodeTitle(headers["announce"])?.take(MAX_ANNOUNCE_CHARS))
+        TropaPrefs.setLinks(id, headers["support-url"], headers["profile-web-page-url"])
     }
 
     fun delete(id: String) {
         SettingsManager.removeSubscriptionWithDefault(id)
         MmkvManager.removeServer(POLICY_GROUP_PREFIX + id)
         TropaPrefs.setSubscriptionInfo(id, null)
+        TropaPrefs.setAnnounce(id, null)
+        TropaPrefs.setLinks(id, null, null)
         if (TropaPrefs.activeConnectionId == id) {
             TropaPrefs.activeConnectionId = list().firstOrNull()?.id
         }

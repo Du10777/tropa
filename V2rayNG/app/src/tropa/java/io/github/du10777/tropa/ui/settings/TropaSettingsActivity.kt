@@ -52,6 +52,7 @@ import com.v2ray.ang.ui.perappproxy.PerAppProxyActivity
 import com.v2ray.ang.util.Utils
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
+import io.github.du10777.tropa.data.LocalProxy
 import io.github.du10777.tropa.ui.log.TropaLogActivity
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.WatchStateStore
@@ -64,12 +65,14 @@ import io.github.du10777.tropa.ui.theme.TropaTheme
 class TropaSettingsActivity : BaseComponentActivity() {
     private var advancedMode by mutableStateOf(TropaPrefs.advancedMode)
 
-    /** Changed on the log screen; read again when coming back. */
+    /** Changed on the log and proxy screens; read again when coming back. */
     private var logLevel by mutableStateOf(ConnectionLog.level)
+    private var proxy by mutableStateOf(LocalProxy.userProxy)
 
     override fun onResume() {
         super.onResume()
         logLevel = ConnectionLog.level
+        proxy = LocalProxy.userProxy
     }
 
     @Composable
@@ -95,6 +98,13 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         }
                         SettingsRow(R.drawable.ic_per_apps_24dp, stringResource(R.string.tropa_settings_per_app), null) {
                             startActivity(Intent(this@TropaSettingsActivity, PerAppProxyActivity::class.java))
+                        }
+                        SettingsRow(
+                            R.drawable.ic_privacy_24dp,
+                            stringResource(R.string.tropa_proxy_title),
+                            if (proxy.enabled) stringResource(R.string.tropa_proxy_address, proxy.port.toString()) else stringResource(R.string.tropa_proxy_off),
+                        ) {
+                            startActivity(Intent(this@TropaSettingsActivity, TropaProxyActivity::class.java))
                         }
                         SettingsRow(R.drawable.ic_check_update_24dp, stringResource(R.string.tropa_settings_checks), null) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaChecksActivity::class.java))

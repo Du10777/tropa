@@ -214,4 +214,23 @@
     <string name="tropa_log_sent">Журнал отправлен на сервер</string>
     <string name="tropa_log_send_no_server">Сервер этого подключения не принимает журналы</string>
     <string name="tropa_log_send_failed">Не удалось отправить (%1$s). Журнал уйдёт на сервер, когда будет связь</string>
+
+    <!-- 0.8: local proxy -->
+    <string name="tropa_proxy_title">Локальный прокси</string>
+    <string name="tropa_proxy_hint">Другие приложения на этом телефоне (браузер, Telegram) смогут выходить в интернет через Тропу: укажите в их настройках прокси 127.0.0.1 и порт ниже, SOCKS5 или HTTP. Работает, пока Тропа подключена.</string>
+    <string name="tropa_proxy_enabled">Включить</string>
+    <string name="tropa_proxy_port">Порт</string>
+    <string name="tropa_proxy_address">127.0.0.1:%1$s</string>
+    <string name="tropa_proxy_user">Логин</string>
+    <string name="tropa_proxy_pass">Пароль</string>
+    <string name="tropa_proxy_no_password">Без логина и пароля прокси сможет использовать любое приложение на телефоне</string>
+    <string name="tropa_proxy_generate">Сгенерировать</string>
+    <string name="tropa_proxy_copy">Скопировать</string>
+    <string name="tropa_proxy_copied">Скопировано</string>
+    <string name="tropa_proxy_saved">Сохранено. Включённый VPN переподключится</string>
+    <string name="tropa_proxy_off">Выключен</string>
+
+    <!-- 0.8: subscription links -->
+    <string name="tropa_connection_support">Поддержка</string>
+    <string name="tropa_connection_web_page">Страница подписки</string>
 </resources>

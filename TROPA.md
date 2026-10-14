@@ -41,6 +41,8 @@ Every change to a file that also exists upstream is listed here and marked with 
 | `V2rayNG/app/build.gradle.kts` | `apply(from = "tropa.gradle")` at the end | single hook for the build overlay |
 | `V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainActivity.kt` | `BackHandler` finishes the screen unless it is the task root | Back from the advanced mode returns to the Tropa screen instead of hiding the app |
 | `V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt` | `coreController` and `reloadCore()` are `internal` instead of `private` | the watchdog probes servers, steers the balancer and reconnects without dropping the VPN |
+| `V2rayNG/app/src/main/java/com/v2ray/ang/service/CoreVpnService.kt` | `onStartCommand` calls `LocalProxy.refreshCredentials()` before `setupVpnService()` | a new port, login and password for the internal SOCKS inbound on every start, before hev (started first) and the core read them |
+| `V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt` | `launchCore` passes the config through `LocalProxy.patchConfig` | local inbounds of JSON subscriptions (10808/10809 without a password) are replaced by the protected internal one, the user's own local proxy is added |
 
 ## Building locally
 

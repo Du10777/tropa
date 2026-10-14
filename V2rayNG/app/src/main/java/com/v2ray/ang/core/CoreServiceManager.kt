@@ -154,7 +154,8 @@ object CoreServiceManager {
         if (dialerAddr.isNotNullEmpty()) {
             CoreNativeManager.reconcileBrowserDialer(dialerAddr)
         }
-        coreController.startLoop(result.content, tunFd)
+        // FORK: local inbounds of JSON configs replaced by the protected internal one (and the user's proxy).
+        coreController.startLoop(io.github.du10777.tropa.data.LocalProxy.patchConfig(result.content), tunFd)
 
         if (!isRunning()) {
             error("Core failed to start")

@@ -150,6 +150,8 @@ class TropaMainActivity : HelperBaseComponentActivity() {
                     onOpenSettings = { startActivity(Intent(this, TropaSettingsActivity::class.java)) },
                     onAcceptClip = { state.clipOffer?.let { viewModel.importText(it.text, defaultName()) } },
                     onDismissClip = viewModel::dismissClipOffer,
+                    onDismissAnnounce = viewModel::dismissAnnounce,
+                    onOpenUrl = { url -> runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) } },
                     onRefreshActive = ::refreshActive,
                     onDeleteActive = ::askDeleteActive,
                     onShowDetails = ::showDetails,

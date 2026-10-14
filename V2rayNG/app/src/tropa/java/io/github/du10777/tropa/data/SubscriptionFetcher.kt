@@ -1,5 +1,6 @@
 package io.github.du10777.tropa.data
 
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,8 +17,9 @@ class FetchResult(
 )
 
 /**
- * Downloads subscriptions for Tropa. Unlike the upstream updater it keeps the final address after
- * redirects and the response headers (title, traffic and expiry info).
+ * Downloads subscriptions for Tropa. Unlike the upstream updater it sends the device headers
+ * (X-HWID and friends, for panels that limit devices) and keeps the final address after redirects
+ * and the response headers (title, traffic and expiry info, announce, support and report addresses).
  */
 object SubscriptionFetcher {
     private const val MAX_BODY_BYTES = 8L * 1024 * 1024
@@ -41,6 +43,10 @@ object SubscriptionFetcher {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", userAgent)
+            .header("X-HWID", DeviceInfo.hwid(AngApplication.application))
+            .header("X-Device-OS", DeviceInfo.OS)
+            .header("X-Ver-OS", DeviceInfo.osVersion)
+            .header("X-Device-Model", DeviceInfo.model)
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")

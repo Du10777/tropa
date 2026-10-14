@@ -1,0 +1,124 @@
+package io.github.du10777.tropa.data
+
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.v2ray.ang.AppConfig
+import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.handler.SettingsManager
+import java.security.SecureRandom
+
+/**
+ * Local proxies of the core.
+ *
+ * The internal SOCKS inbound, which hev-socks5-tunnel feeds the VPN traffic into, gets a random
+ * port and a random login and password on every start of the VPN (the upstream settings
+ * PREF_DYNAMIC_SOCKS_PORT and PREF_SOCKS_USERNAME/PASSWORD, which hev reads too). Other apps on
+ * the phone can then neither use it nor find it on the well-known 10808/10809 to tell that a VPN
+ * runs. JSON subscriptions bring their own local inbounds (3X-UI: socks 10808 and http 10809
+ * without a password): they are replaced by the internal one.
+ *
+ * The user's own local proxy (off by default) is one more inbound with the port, login and
+ * password from the settings; Xray's socks inbound answers HTTP proxy requests on the same port.
+ */
+object LocalProxy {
+    private const val ENABLED = "tropa_proxy_enabled"
+    private const val PORT = "tropa_proxy_port"
+    private const val USER = "tropa_proxy_user"
+    private const val PASS = "tropa_proxy_pass"
+    const val USER_TAG = "tropa-local"
+    private val LOCAL_PROTOCOLS = setOf("socks", "http", "mixed")
+    private const val ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    private val random = SecureRandom()
+
+    data class UserProxy(val enabled: Boolean, val port: Int, val user: String, val pass: String)
+
+    data class Internal(val port: Int, val user: String, val pass: String)
+
+    var userProxy: UserProxy
+        get() {
+            val port = MmkvManager.decodeSettingsInt(PORT, 0).takeIf { it in 1024..65535 }
+                ?: (20000 + random.nextInt(40000)).also { MmkvManager.encodeSettings(PORT, it) }
+            return UserProxy(
+                enabled = MmkvManager.decodeSettingsBool(ENABLED, false),
+                port = port,
+                user = MmkvManager.decodeSettingsString(USER).orEmpty(),
+                pass = MmkvManager.decodeSettingsString(PASS).orEmpty(),
+            )
+        }
+        set(value) {
+            MmkvManager.encodeSettings(ENABLED, value.enabled)
+            MmkvManager.encodeSettings(PORT, value.port)
+            MmkvManager.encodeSettings(USER, value.user)
+            MmkvManager.encodeSettings(PASS, value.pass)
+        }
+
+    /**
+     * Every start of the VPN service, before hev and the core read them (they start in that order):
+     * a random port (upstream's dynamic SOCKS port) and a new login and password. Core reloads
+     * without dropping the VPN keep them, so hev and the core always agree.
+     */
+    fun refreshCredentials() {
+        MmkvManager.encodeSettings(AppConfig.PREF_DYNAMIC_SOCKS_PORT, true)
+        SettingsManager.refreshRuntimeSocksPort()
+        MmkvManager.encodeSettings(AppConfig.PREF_SOCKS_USERNAME, token(12))
+        MmkvManager.encodeSettings(AppConfig.PREF_SOCKS_PASSWORD, token(24))
+    }
+
+    fun token(length: Int): String = buildString { repeat(length) { append(ALPHABET[random.nextInt(ALPHABET.length)]) } }
+
+    /** The config the core starts with: local inbounds replaced as described above. */
+    fun patchConfig(config: String): String {
+        val user = SettingsManager.getSocksUsername() ?: return config
+        val pass = SettingsManager.getSocksPassword() ?: return config
+        return patch(config, Internal(SettingsManager.getSocksPort(), user, pass), userProxy.takeIf { it.enabled })
+    }
+
+    internal fun patch(config: String, internal: Internal, user: UserProxy?): String {
+        val root = runCatching { JsonParser.parseString(config).asJsonObject }.getOrNull() ?: return config
+        val inbounds = root.get("inbounds")?.takeIf { it.isJsonArray }?.asJsonArray ?: JsonArray().also { root.add("inbounds", it) }
+        val local = inbounds.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject }
+            .filter { it.str("protocol") in LOCAL_PROTOCOLS }
+        // The first socks inbound keeps its tag (routing rules may name it), sniffing and user level.
+        val template = local.firstOrNull { it.str("protocol") != "http" } ?: local.firstOrNull()
+        local.forEach { inbounds.remove(it) }
+        val sniffing = template?.get("sniffing")?.takeIf { it.isJsonObject }?.deepCopy()?.asJsonObject ?: JsonObject().apply {
+            addProperty("enabled", true)
+            add("destOverride", JsonArray().apply { add("http"); add("tls"); add("quic") })
+        }
+        val level = template?.get("settings")?.takeIf { it.isJsonObject }?.asJsonObject?.get("userLevel")
+        inbounds.add(
+            inbound(template?.str("tag") ?: "socks", internal.port, internal.user, internal.pass, sniffing, level)
+        )
+        if (user != null) {
+            inbounds.add(inbound(USER_TAG, user.port, user.user, user.pass, sniffing.deepCopy(), level))
+        }
+        return root.toString()
+    }
+
+    private fun inbound(tag: String, port: Int, user: String, pass: String, sniffing: JsonObject, level: com.google.gson.JsonElement?) =
+        JsonObject().apply {
+            addProperty("tag", tag)
+            addProperty("listen", AppConfig.LOOPBACK)
+            addProperty("port", port)
+            addProperty("protocol", "socks")
+            add("settings", JsonObject().apply {
+                if (user.isNotEmpty() && pass.isNotEmpty()) {
+                    addProperty("auth", "password")
+                    add("accounts", JsonArray().apply {
+                        add(JsonObject().apply {
+                            addProperty("user", user)
+                            addProperty("pass", pass)
+                        })
+                    })
+                } else {
+                    addProperty("auth", "noauth")
+                }
+                addProperty("udp", true)
+                level?.let { add("userLevel", it.deepCopy()) }
+            })
+            add("sniffing", sniffing)
+        }
+
+    private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString
+}

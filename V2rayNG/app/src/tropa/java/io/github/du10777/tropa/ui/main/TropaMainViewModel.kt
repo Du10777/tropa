@@ -11,6 +11,7 @@ import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.LinkCandidate
 import io.github.du10777.tropa.data.LinkParser
+import io.github.du10777.tropa.data.SubscriptionRefresher
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.CoreState
 import io.github.du10777.tropa.service.ServiceStateMonitor
@@ -43,6 +44,8 @@ data class MainUiState(
     val busy: Boolean = false,
     /** Watchdog report: channel check, active server, reconnects (null while the core is down). */
     val watch: WatchState? = null,
+    /** The server's message (Announce header) of the active connection, unless the user closed it. */
+    val announce: String? = null,
 )
 
 sealed interface MainEvent {
@@ -66,6 +69,11 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
         // The upstream main screen copies geoip.dat / geosite.dat from the APK; without them configs
         // with geoip:/geosite: rules do not start. Tropa's screen replaces it, so it copies them too.
         viewModelScope.launch(Dispatchers.IO) { SettingsManager.initAssets(app, app.assets) }
+        // Tropa's own subscription updates: hourly, plus the due ones right now.
+        SubscriptionRefresher.schedule(app)
+        viewModelScope.launch(Dispatchers.IO) {
+            if (SubscriptionRefresher.refreshDue() > 0) withContext(Dispatchers.Main) { reload() }
+        }
         viewModelScope.launch {
             combine(monitor.state, monitor.lastError, monitor.watch) { core, error, watch -> Triple(core, error, watch) }
                 .collect { (core, error, watch) ->
@@ -88,11 +96,13 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
     fun reload() {
         val connections = Connections.list()
         val activeId = Connections.activeId(connections)
+        val active = connections.firstOrNull { it.id == activeId }
         _state.update { state ->
             state.copy(
                 loaded = true,
                 connections = connections,
-                active = connections.firstOrNull { it.id == activeId },
+                active = active,
+                announce = active?.announce?.takeIf { fingerprint(it) != TropaPrefs.dismissedAnnounce(active.id) },
             )
         }
     }
@@ -127,6 +137,12 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         _state.update { it.copy(clipOffer = offer) }
+    }
+
+    fun dismissAnnounce() {
+        val active = state.value.active ?: return
+        active.announce?.let { TropaPrefs.setDismissedAnnounce(active.id, fingerprint(it)) }
+        _state.update { it.copy(announce = null) }
     }
 
     fun dismissClipOffer() {

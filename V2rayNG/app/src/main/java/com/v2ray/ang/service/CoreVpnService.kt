@@ -87,6 +87,8 @@ class CoreVpnService : VpnService(), ServiceControl {
             return START_NOT_STICKY
         }
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service command received, systemVpnStart=$isSystemVpnStart")
+        // FORK: a new port, login and password for the internal SOCKS inbound before hev and the core read them.
+        io.github.du10777.tropa.data.LocalProxy.refreshCredentials()
         if (!setupVpnService()) {
             unlockStart()
             // Stop service if setup fails to avoid infinite restart loops (START_STICKY)
