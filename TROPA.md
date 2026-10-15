@@ -30,7 +30,8 @@ upstream changes can be merged with a plain `git merge` and conflicts stay rare 
 - `.github/README.md` — the repository front page (GitHub prefers it over the upstream `README.md`).
 - AndroidLibXrayLite fork: only new `tropa_*.go` files. `tropa_api.go` adds `TropaProbe` (fetch a URL
   through the running core, optionally forced through one outbound), `TropaOverrideBalancer` and
-  `TropaBalancerTarget` (steer a balancer in process, no gRPC port).
+  `TropaBalancerTarget` (steer a balancer in process, no gRPC port), `TropaAddOutbound` (add a server
+  of an updated subscription to the running core, so it is used without a restart).
 
 ## Changes to upstream files
 
@@ -43,6 +44,7 @@ Every change to a file that also exists upstream is listed here and marked with 
 | `V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt` | `coreController` and `reloadCore()` are `internal` instead of `private` | the watchdog probes servers, steers the balancer and reconnects without dropping the VPN |
 | `V2rayNG/app/src/main/java/com/v2ray/ang/service/CoreVpnService.kt` | `onStartCommand` calls `LocalProxy.refreshCredentials()` before `setupVpnService()` | a new port, login and password for the internal SOCKS inbound on every start, before hev (started first) and the core read them |
 | `V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt` | `launchCore` passes the config through `LocalProxy.patchConfig` | local inbounds of JSON subscriptions (10808/10809 without a password) are replaced by the protected internal one, the user's own local proxy is added |
+| `V2rayNG/app/src/main/java/com/v2ray/ang/core/CoreServiceManager.kt` | `reloadCore()` wakes `TropaWatchdog` after the core is back | after a network handover the watchdog puts its server choice back at once (and follows the saved config if a subscription was applied on the fly) instead of on its next round |
 
 ## Building locally
 

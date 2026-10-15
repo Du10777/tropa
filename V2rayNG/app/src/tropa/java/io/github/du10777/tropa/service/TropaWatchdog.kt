@@ -51,13 +51,14 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Starts and stops the watchdog together with the core (runs in the VPN service process). */
 class TropaServiceEventsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == ACTION_WAKE) {
-            TropaWatchdog.wakeUp()
-            return
+        when (intent.action) {
+            ACTION_WAKE -> return TropaWatchdog.wakeUp()
+            ACTION_SUBSCRIPTION_CHANGED -> return TropaWatchdog.onSubscriptionChanged()
         }
         when (intent.getIntExtra("key", 0)) {
             AppConfig.MSG_STATE_START_SUCCESS -> TropaWatchdog.start(context)
@@ -67,10 +68,16 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_WAKE = "io.github.du10777.tropa.action.WAKE_WATCHDOG"
+        const val ACTION_SUBSCRIPTION_CHANGED = "io.github.du10777.tropa.action.SUBSCRIPTION_CHANGED"
 
         /** Lets the watchdog (VPN service process) pick up changed settings right away. */
         fun wakeWatchdog(context: Context) {
             context.sendBroadcast(Intent(ACTION_WAKE).setPackage(context.packageName))
+        }
+
+        /** The active subscription was updated in the UI: the running tunnel takes its servers over. */
+        fun subscriptionChanged(context: Context) {
+            context.sendBroadcast(Intent(ACTION_SUBSCRIPTION_CHANGED).setPackage(context.packageName))
         }
     }
 }
@@ -111,6 +118,9 @@ object TropaWatchdog {
 
     private var scope: CoroutineScope? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
+
+    /** The active subscription changed: the watch session applies it to the running core. */
+    private val subscriptionChanged = AtomicBoolean(false)
 
     @Volatile
     private var screenOn = true
@@ -229,6 +239,12 @@ object TropaWatchdog {
         wake.trySend(Unit)
     }
 
+    /** The active subscription has new servers: they go into the running core, nothing restarts. */
+    fun onSubscriptionChanged() {
+        subscriptionChanged.set(true)
+        wakeUp()
+    }
+
     private fun registerSignals(app: Context) {
         if (signalsRegistered) return
         val filter = IntentFilter().apply {
@@ -297,6 +313,12 @@ object TropaWatchdog {
 
         /** The active subscription was downloaded again during this outage (servers may have moved). */
         private var subscriptionRetried = false
+
+        /** Tags of all outbounds in the running core, so servers added on the fly get free ones. */
+        private val coreTags = HashSet<String>()
+
+        /** The active server left the subscription: new connections move on once another one answers. */
+        private var leaving: String? = null
         /** Last outcome and last written check of each server, to keep steady periods short in the log. */
         private val lastOutcome = ConcurrentHashMap<String, Boolean>()
         private val lastWrittenAt = ConcurrentHashMap<String, Long>()
@@ -321,7 +343,11 @@ object TropaWatchdog {
             var attempt = 0
             while (currentCoroutineContext().isActive) {
                 if (!CheckSettings.enabled) {
-                    if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
+                    if (connectedAt == 0L) {
+                        connectedAt = System.currentTimeMillis()
+                        scope.launch { refreshDueSubscriptions() }
+                    }
+                    if (subscriptionChanged.getAndSet(false)) applyUnchecked()
                     publish(WatchPhase.CHECKS_OFF)
                     waitForWake(CHECKS_OFF_RECHECK_MS)
                     continue
@@ -347,27 +373,29 @@ object TropaWatchdog {
                 if (attempt >= REPORT_AFTER_ATTEMPTS && !reportSaved) {
                     reportSaved = ProblemReports.save(context, currentState(WatchPhase.NO_SERVER, attempt, 0L))
                 }
+                var updated = false
                 if (attempt >= REPORT_AFTER_ATTEMPTS && !subscriptionRetried) {
                     subscriptionRetried = true
-                    // The servers may have moved: a changed subscription is worth a full restart.
-                    if (SubscriptionRefresher.refreshActive() == Connections.Refresh.UPDATED) {
-                        record(ProbeEvent(System.currentTimeMillis(), "subscription", "", null, "", ok = true))
-                        LauncherManager.restartService(context)
-                    }
+                    // The servers may have moved: then the reconnect right below starts on the new list.
+                    updated = SubscriptionRefresher.refreshActive() == Connections.Refresh.UPDATED
+                    if (updated) record(subscriptionEvent("no server answers: reconnecting on the new list"))
                 }
-                waitForWake(pauseMs)
+                if (!updated) waitForWake(pauseMs)
                 record(ProbeEvent(System.currentTimeMillis(), "reload", "", null, "", ok = true))
                 connectedAt = 0L
-                reconnect(attempt)
+                reconnect(attempt, rotate = !updated)
                 loadPlan()
             }
         }
 
-        /** Reads the servers of the configuration the core runs. */
+        /** Reads the servers of the configuration the core runs (the saved one, the core starts from it). */
         private fun loadPlan() {
-            val guid = MmkvManager.getSelectServer()
-            val config = guid?.let { runCatching { CoreConfigManager.getV2rayConfig(context, it) }.getOrNull() }
-            plan = config?.takeIf { it.status }?.let { NodePlanner.fromConfigJson(it.content) } ?: NodePlan(null, emptyList())
+            subscriptionChanged.set(false)
+            val config = savedConfig()
+            plan = config?.let(NodePlanner::fromConfigJson) ?: NodePlan(null, emptyList())
+            coreTags.clear()
+            config?.let { coreTags += NodePlanner.outboundTags(it) }
+            leaving = null
             if (plan.nodes.isEmpty()) {
                 // Unknown layout: check the path the routing picks.
                 plan = NodePlan(null, listOf(Node(tag = "", name = "", protocol = "", address = null, transport = null)))
@@ -382,13 +410,153 @@ object TropaWatchdog {
             }
         }
 
+        private fun savedConfig(): String? {
+            val guid = MmkvManager.getSelectServer() ?: return null
+            return runCatching { CoreConfigManager.getV2rayConfig(context, guid) }.getOrNull()?.takeIf { it.status }?.content
+        }
+
         /** Subscriptions are updated only while the VPN is on: every half an hour, when connected. */
         private suspend fun refreshSubscriptions() {
             while (currentCoroutineContext().isActive) {
                 delay(SUBSCRIPTION_CHECK_MS)
-                if (phase == WatchPhase.CONNECTED) runCatching { SubscriptionRefresher.refreshDue() }
+                if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF) refreshDueSubscriptions()
             }
         }
+
+        /** Downloads the due subscriptions; new servers of the active one go into the running core. */
+        private fun refreshDueSubscriptions() {
+            val results = runCatching { SubscriptionRefresher.refreshDue() }.getOrNull() ?: return
+            if (results[Connections.activeId()] == Connections.Refresh.UPDATED) onSubscriptionChanged()
+        }
+
+        /**
+         * The active subscription changed while connected. Servers that stayed keep their place in
+         * the running core with their open connections; new ones are added to it and checked, and
+         * get new connections when noticeably better (the usual rule). If the active server is gone,
+         * new connections move to the best one that answers while its open ones live out.
+         * Servers are matched by their settings: a new config may give them other tags.
+         */
+        private suspend fun applySubscription() {
+            val config = savedConfig() ?: return
+            val fresh = NodePlanner.fromConfigJson(config)
+            if (plan.balancerTag == null) return applyWithoutBalancer(fresh)
+            val running = plan.nodes.associateBy { it.fingerprint }
+            val freshNodes = fresh.nodes.distinctBy { it.fingerprint }
+            // Tags in the running core by tags in the new config, for references between outbounds.
+            val renamed = HashMap<String, String>()
+            freshNodes.forEach { node -> running[node.fingerprint]?.let { renamed[node.tag] = it.tag } }
+            val nodes = freshNodes.mapNotNull { node ->
+                running[node.fingerprint] ?: addToCore(node, renamed)?.also { renamed[node.tag] = it.tag }
+            }
+            val added = nodes.filter { it.fingerprint !in running }
+            val removed = plan.nodes.filter { node -> freshNodes.none { it.fingerprint == node.fingerprint } }
+            if (added.isEmpty() && removed.isEmpty()) return
+            record(
+                subscriptionEvent(
+                    listOfNotNull(
+                        added.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "added: ") { it.name },
+                        removed.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "removed: ") { it.name },
+                    ).joinToString(" · "),
+                ),
+            )
+            // A server that is gone may still carry connections: while active it stays watched.
+            val gone = removed.firstOrNull { it.tag == activeTag }
+            val watched = nodes + listOfNotNull(gone)
+            plan = NodePlan(plan.balancerTag, watched, watched)
+            selector.retain(watched.map { it.tag })
+            leaving = gone?.tag
+            if (added.isNotEmpty()) probeAll(added.map { it.tag })
+            gone?.let { moveOff(it.tag) }
+            publish(WatchPhase.CONNECTED)
+        }
+
+        /**
+         * No balancer in the running core, so new connections cannot be steered. While the active
+         * server is still in the subscription, the new list waits for the next start. If it is gone,
+         * the new server is checked through the running core first, and only if it answers the core
+         * restarts in place on the new list.
+         */
+        private suspend fun applyWithoutBalancer(fresh: NodePlan) {
+            val active = plan.nodes.firstOrNull { it.tag == activeTag }?.takeIf { it.fingerprint.isNotEmpty() } ?: return
+            if (fresh.proxies.any { it.fingerprint == active.fingerprint }) {
+                record(subscriptionEvent("current server stays: the new list applies at the next start"))
+                return
+            }
+            val candidate = fresh.nodes.firstOrNull()?.let { addToCore(it, emptyMap()) }
+            if (candidate == null || !probeLatency(candidate.tag).ok || !throughputOk(candidate.tag)) {
+                record(subscriptionEvent("new server does not answer: staying on the current one"))
+                return
+            }
+            record(subscriptionEvent("server replaced: reconnecting"))
+            restartInPlace()
+        }
+
+        /** Checks are off, nothing steers: the core restarts on the new list only if none of its servers stayed. */
+        private fun applyUnchecked() {
+            val fresh = savedConfig()?.let(NodePlanner::fromConfigJson) ?: return
+            val known = plan.nodes.map { it.fingerprint }.filter { it.isNotEmpty() }
+            if (known.isEmpty() || fresh.proxies.any { it.fingerprint in known }) {
+                record(subscriptionEvent("current servers stay: the new list applies at the next start"))
+                return
+            }
+            record(subscriptionEvent("servers replaced: reconnecting"))
+            restartInPlace()
+        }
+
+        private fun restartInPlace() {
+            reloadCore()
+            loadPlan()
+            plan.nodes.firstOrNull()?.let { select(it.tag) }
+        }
+
+        /**
+         * Restarts the core without dropping the VPN. Every reload wakes the watchdog (for the ones
+         * after network handovers); after its own reload that wake-up would cut the pause before
+         * the next attempt, so it is dropped.
+         */
+        private fun reloadCore() {
+            runCatching { CoreServiceManager.reloadCore() }.onFailure { LogUtil.e(TAG, "core reload failed", it) }
+            wake.tryReceive()
+        }
+
+        /** Adds a server to the running core under a tag that is free there; null if the core refuses it. */
+        private fun addToCore(node: Node, renamed: Map<String, String>): Node? {
+            val outbound = node.outbound ?: return null
+            repeat(3) {
+                val tag = freeTag(node.tag)
+                coreTags += tag
+                val result = runCatching {
+                    CoreServiceManager.coreController.tropaAddOutbound(NodePlanner.prepareOutbound(outbound, tag, renamed))
+                }
+                val error = result.exceptionOrNull() ?: return node.copy(tag = tag)
+                LogUtil.e(TAG, "cannot add server ${node.name}", error)
+                if (error.message?.contains("existing tag") != true) return null
+            }
+            return null
+        }
+
+        private fun freeTag(base: String): String =
+            (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base-$it" }).first { it !in coreTags }
+
+        /** The active server left the subscription: new connections go elsewhere once another one answers. */
+        private fun moveOff(gone: String) {
+            if (activeTag == gone) {
+                val next = selector.bestAlive(except = gone) ?: return
+                if (!throughputOk(next)) {
+                    selector.record(next, ok = false, latencyMs = null)
+                    return
+                }
+                switchTo(next, "previous one left the subscription")
+            }
+            // Not used for new connections any more; its open ones live out in the core.
+            leaving = null
+            val watched = plan.nodes.filter { it.tag != gone }
+            plan = NodePlan(plan.balancerTag, watched, watched)
+            selector.retain(watched.map { it.tag })
+        }
+
+        private fun subscriptionEvent(detail: String) =
+            ProbeEvent(System.currentTimeMillis(), "subscription", "", null, "", ok = true, detail = detail.ifEmpty { null })
 
         /** At the debug level, copies the Xray core messages (logcat tag GoLog of this app) into the log. */
         private suspend fun captureCore() {
@@ -490,6 +658,7 @@ object TropaWatchdog {
             while (currentCoroutineContext().isActive && CheckSettings.enabled) {
                 waitForWake(nextDelay)
                 ensureOverride()
+                if (subscriptionChanged.getAndSet(false)) applySubscription()
                 val tag = activeTag ?: return
                 val othersDue = plan.isBalanced && screenOn &&
                     System.currentTimeMillis() - lastOthersAt >= CheckSettings.othersIntervalSec * 1000L
@@ -514,14 +683,16 @@ object TropaWatchdog {
                 }
                 when (val decision = selector.evaluate(tag)) {
                     NodeSelector.Decision.Keep -> publish(WatchPhase.CONNECTED)
-                    is NodeSelector.Decision.SwitchTo -> {
-                        LogUtil.i(TAG, "switching new connections to ${decision.tag} (${decision.reason})")
-                        record(event(decision.tag, "switch", "", ok = true, ProbeResult(ok = true), error = null))
-                        select(decision.tag)
-                        publish(WatchPhase.CONNECTED)
-                    }
+                    is NodeSelector.Decision.SwitchTo -> switchTo(
+                        decision.tag,
+                        if (decision.reason == NodeSelector.Reason.BETTER) "faster" else "previous one is down",
+                    )
 
                     NodeSelector.Decision.AllDead -> return
+                }
+                leaving?.let { gone ->
+                    moveOff(gone)
+                    publish(WatchPhase.CONNECTED)
                 }
                 nextDelay = if (result.ok) intervalMs() else RETRY_AFTER_FAILURE_MS
             }
@@ -530,9 +701,16 @@ object TropaWatchdog {
         private fun intervalMs(): Long =
             (if (screenOn) CheckSettings.activeIntervalSec else CheckSettings.screenOffIntervalSec) * 1000L
 
+        private fun switchTo(tag: String, reason: String) {
+            LogUtil.i(TAG, "switching new connections to $tag ($reason)")
+            record(event(tag, "switch", "", ok = true, ProbeResult(ok = true), error = null, detail = reason))
+            select(tag)
+            publish(WatchPhase.CONNECTED)
+        }
+
         private fun select(tag: String) {
             activeTag = tag
-            if (plan.isBalanced) override(tag)
+            if (plan.balancerTag != null) override(tag)
         }
 
         private fun override(tag: String) {
@@ -541,13 +719,34 @@ object TropaWatchdog {
                 .onFailure { LogUtil.e(TAG, "balancer override failed", it) }
         }
 
-        /** The core restarts in place on network handovers, which drops the override. */
+        /**
+         * The core restarts in place on network handovers: that drops the override, and the core
+         * then runs the saved config, which is not the plan any more once a changed subscription
+         * was applied on the fly. Then the plan follows the core.
+         */
         private fun ensureOverride() {
             val balancer = plan.balancerTag ?: return
             val tag = activeTag ?: return
-            if (!plan.isBalanced) return
             val current = runCatching { CoreServiceManager.coreController.tropaBalancerTarget(balancer) }.getOrNull()
-            if (current != tag) override(tag)
+            if (current != tag && !followSavedConfig()) override(tag)
+        }
+
+        /** Takes the plan from the saved config if its servers differ, keeping what is known about them. */
+        private fun followSavedConfig(): Boolean {
+            val config = savedConfig() ?: return false
+            val fresh = NodePlanner.fromConfigJson(config)
+            if (fresh.nodes.isEmpty()) return false
+            if (fresh.balancerTag == plan.balancerTag && fresh.nodes.map { it.tag to it.fingerprint } == plan.nodes.map { it.tag to it.fingerprint }) return false
+            val known = plan.nodes.associateBy { it.fingerprint }
+            val previous = fresh.nodes.mapNotNull { node -> known[node.fingerprint]?.let { node.tag to it.tag } }.toMap()
+            val active = plan.nodes.firstOrNull { it.tag == activeTag }?.fingerprint
+            plan = fresh
+            coreTags.clear()
+            coreTags += NodePlanner.outboundTags(config)
+            leaving = null
+            selector.retain(fresh.nodes.map { it.tag }, previous)
+            select(fresh.nodes.firstOrNull { it.fingerprint == active }?.tag ?: selector.bestAlive() ?: fresh.nodes.first().tag)
+            return true
         }
 
         /** Checks the servers in parallel and records the results. */
@@ -672,13 +871,13 @@ object TropaWatchdog {
             error == null
         }
 
-        private fun reconnect(attempt: Int) {
+        private fun reconnect(attempt: Int, rotate: Boolean) {
             if (!CoreServiceManager.isRunning()) {
                 LauncherManager.restartService(context)
                 return
             }
-            if (!plan.isBalanced && attempt >= ROTATE_PROFILE_AFTER) rotateProfile()
-            runCatching { CoreServiceManager.reloadCore() }.onFailure { LogUtil.e(TAG, "core reload failed", it) }
+            if (rotate && !plan.isBalanced && attempt >= ROTATE_PROFILE_AFTER) rotateProfile()
+            reloadCore()
         }
 
         /** Several single-server configs: try the next one of the same connection. */
@@ -695,7 +894,7 @@ object TropaWatchdog {
         private fun onConnected() {
             if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
             subscriptionRetried = false
-            scope.launch { runCatching { SubscriptionRefresher.refreshDue() } }
+            scope.launch { refreshDueSubscriptions() }
             if (reportSaved || ProblemReports.hasPending(context)) {
                 reportSaved = false
                 scope.launch { ProblemReports.uploadPending(context) }

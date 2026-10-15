@@ -233,5 +233,31 @@
     <!-- 0.8: subscription links -->
     <string name="tropa_connection_support">Поддержка</string>
     <string name="tropa_connection_web_page">Страница подписки</string>
-    <string name="tropa_log_subscription">Подписка обновилась, перезапуск</string>
+    <string name="tropa_log_subscription">Подписка обновилась</string>
+    <!-- 0.9: приложения без VPN -->
+    <string name="tropa_apps_explain">Эти приложения ходят в интернет напрямую, мимо VPN. Например, банки и госсервисы, которые не пускают с зарубежных адресов.</string>
+    <string name="tropa_apps_add_preset">Добавить банки и госсервисы</string>
+    <string name="tropa_apps_add_preset_hint">Только те, что установлены на телефоне</string>
+    <string name="tropa_apps_add">Добавить приложение</string>
+    <string name="tropa_apps_empty">Список пуст: все приложения идут через VPN.</string>
+    <string name="tropa_apps_not_installed">%1$s · не установлено</string>
+    <string name="tropa_apps_remove">Убрать</string>
+    <string name="tropa_apps_search">Поиск</string>
+    <string name="tropa_apps_preset_none">Из списка банков и госсервисов ничего не установлено или всё уже добавлено.</string>
+    <plurals name="tropa_apps_preset_added">
+        <item quantity="one">Добавлено %d приложение</item>
+        <item quantity="few">Добавлено %d приложения</item>
+        <item quantity="many">Добавлено %d приложений</item>
+        <item quantity="other">Добавлено %d приложения</item>
+    </plurals>
+    <string name="tropa_apps_restart_note">VPN переподключится, чтобы применить изменения, когда вы уйдёте с этого экрана.</string>
+    <string name="tropa_apps_reversed">В расширенном режиме список настроен наоборот: через VPN идут только выбранные приложения (%d).</string>
+    <string name="tropa_apps_reversed_reset">Начать список приложений без VPN</string>
+    <string name="tropa_apps_none">Нет</string>
+    <plurals name="tropa_apps_count">
+        <item quantity="one">%d приложение</item>
+        <item quantity="few">%d приложения</item>
+        <item quantity="many">%d приложений</item>
+        <item quantity="other">%d приложения</item>
+    </plurals>
 </resources>

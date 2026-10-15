@@ -1,7 +1,10 @@
 package io.github.du10777.tropa.data
 
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.google.gson.JsonPrimitive
+import java.security.MessageDigest
 
 /** One server (outbound) of a running configuration. */
 data class Node(
@@ -10,6 +13,10 @@ data class Node(
     val protocol: String,
     val address: String?,
     val transport: String?,
+    /** The outbound without its tag: the same server in two versions of a subscription. */
+    val fingerprint: String = "",
+    /** The outbound as Xray JSON, to add it to a running core. */
+    val outbound: String? = null,
 )
 
 /**
@@ -64,7 +71,46 @@ object NodePlanner {
             .ifEmpty { null }
         val name = POLICY_MEMBER.find(tag)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
             ?: listOfNotNull(displayProtocol(protocol), address?.substringBeforeLast(':')).joinToString(" · ")
-        return Node(tag, name, displayProtocol(protocol), address, transport)
+        val content = outbound.deepCopy().apply {
+            remove("tag")
+            // Set by the app when the server name was resolved while building the config: not the server's.
+            obj("streamSettings")?.obj("sockopt")?.let { it.remove("domainStrategy"); it.remove("happyEyeballs") }
+        }
+        return Node(tag, name, displayProtocol(protocol), address, transport, fingerprint(content), outbound.toString())
+    }
+
+    /** A stable digest of a JSON value: object keys sorted, so the order in the file does not matter. */
+    fun fingerprint(value: JsonElement): String =
+        MessageDigest.getInstance("SHA-256").digest(canonical(value).toByteArray()).take(16).joinToString("") { "%02x".format(it) }
+
+    private fun canonical(value: JsonElement): String = when {
+        value.isJsonObject -> value.asJsonObject.entrySet().sortedBy { it.key }
+            .joinToString(",", "{", "}") { (key, item) -> JsonPrimitive(key).toString() + ":" + canonical(item) }
+        value.isJsonArray -> value.asJsonArray.joinToString(",", "[", "]") { canonical(it) }
+        else -> value.toString()
+    }
+
+    /** Tags of all outbounds of a configuration, proxies or not. */
+    fun outboundTags(json: String): Set<String> =
+        runCatching { JsonParser.parseString(json).asJsonObject.getAsJsonArray("outbounds") }.getOrNull()
+            ?.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject?.string("tag")?.takeIf { tag -> tag.isNotEmpty() } }
+            ?.toSet()
+            .orEmpty()
+
+    /**
+     * [outbound] ready to be added to a running core under [tag]: its references to other
+     * outbounds (dialer proxy, proxy chain) are pointed at the tags those have there, [renamed].
+     */
+    fun prepareOutbound(outbound: String, tag: String, renamed: Map<String, String>): String {
+        val root = JsonParser.parseString(outbound).asJsonObject
+        root.addProperty("tag", tag)
+        fun remap(obj: JsonObject?, key: String) {
+            val target = obj?.string(key) ?: return
+            renamed[target]?.let { obj.addProperty(key, it) }
+        }
+        remap(root.obj("streamSettings")?.obj("sockopt"), "dialerProxy")
+        remap(root.obj("proxySettings"), "tag")
+        return root.toString()
     }
 
     private fun address(settings: JsonObject?): String? {
@@ -96,4 +142,7 @@ object NodePlanner {
 
     private fun JsonObject.string(key: String): String? =
         get(key)?.takeIf { it.isJsonPrimitive }?.asString
+
+    private fun JsonObject.obj(key: String): JsonObject? =
+        get(key)?.takeIf { it.isJsonObject }?.asJsonObject
 }

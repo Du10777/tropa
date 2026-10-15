@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -48,8 +49,8 @@ import com.v2ray.ang.enums.Language
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.main.MainActivity
-import com.v2ray.ang.ui.perappproxy.PerAppProxyActivity
 import com.v2ray.ang.util.Utils
+import io.github.du10777.tropa.data.BypassApps
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.LocalProxy
@@ -68,11 +69,13 @@ class TropaSettingsActivity : BaseComponentActivity() {
     /** Changed on the log and proxy screens; read again when coming back. */
     private var logLevel by mutableStateOf(ConnectionLog.level)
     private var proxy by mutableStateOf(LocalProxy.userProxy)
+    private var bypassApps by mutableStateOf(0)
 
     override fun onResume() {
         super.onResume()
         logLevel = ConnectionLog.level
         proxy = LocalProxy.userProxy
+        bypassApps = if (BypassApps.reversed) 0 else BypassApps.packages().size
     }
 
     @Composable
@@ -96,8 +99,12 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         SettingsRow(R.drawable.ic_lock_24dp, stringResource(R.string.tropa_settings_permissions), null) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaPermissionsActivity::class.java))
                         }
-                        SettingsRow(R.drawable.ic_per_apps_24dp, stringResource(R.string.tropa_settings_per_app), null) {
-                            startActivity(Intent(this@TropaSettingsActivity, PerAppProxyActivity::class.java))
+                        SettingsRow(
+                            R.drawable.ic_per_apps_24dp,
+                            stringResource(R.string.tropa_settings_per_app),
+                            if (bypassApps == 0) stringResource(R.string.tropa_apps_none) else pluralStringResource(R.plurals.tropa_apps_count, bypassApps, bypassApps),
+                        ) {
+                            startActivity(Intent(this@TropaSettingsActivity, TropaAppsActivity::class.java))
                         }
                         SettingsRow(
                             R.drawable.ic_privacy_24dp,

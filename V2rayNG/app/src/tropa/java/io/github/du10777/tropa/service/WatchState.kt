@@ -36,7 +36,8 @@ data class ProbeEvent(
     val at: Long,
     /**
      * Checks: latency | download | direct. Session: start | stop | connected | no_server |
-     * no_internet | reload | switch | subscription (updated during an outage: restart).
+     * no_internet | reload | switch (detail: why) | subscription (the active one changed, detail:
+     * what was done with it).
      * Details: network (target = wifi | cellular | ethernet | none | other, ok = validated by
      * Android) | servers | screen_on | screen_off | core (Xray message).
      */

@@ -58,11 +58,69 @@ class NodePlannerTest {
     fun `broken json gives an empty plan`() {
         assertTrue(NodePlanner.fromConfigJson("not json").nodes.isEmpty())
     }
+
+    @Test
+    fun `a server keeps its fingerprint when its tag and key order change`() {
+        val before = NodePlanner.fromConfigJson(balancedConfig).nodes[0]
+        val after = NodePlanner.fromConfigJson(
+            """{"outbounds":[
+                 {"protocol":"vless","streamSettings":{"security":"tls","network":"xhttp"},"tag":"bal-2-vless",
+                  "settings":{"vnext":[{"port":443,"address":"entry.example.org"}]}}],
+               "routing":{"balancers":[{"tag":"balancer","selector":["bal-2-"]}]}}"""
+        ).nodes[0]
+        assertEquals(before.fingerprint, after.fingerprint)
+        assertTrue(before.fingerprint.isNotEmpty())
+    }
+
+    @Test
+    fun `fingerprint ignores what the app adds for resolved server names, not the server settings`() {
+        fun node(sockopt: String, port: Int) = NodePlanner.fromConfigJson(
+            """{"outbounds":[{"tag":"proxy","protocol":"vless","settings":{"vnext":[{"address":"a.example","port":$port}]},
+               "streamSettings":{"network":"tcp","sockopt":$sockopt}}]}"""
+        ).nodes[0].fingerprint
+        val plain = node("{}", 443)
+        assertEquals(plain, node("""{"domainStrategy":"UseIP","happyEyeballs":{"interleave":2}}""", 443))
+        assertFalse(plain == node("{}", 8443))
+    }
+
+    @Test
+    fun `outbound prepared for the running core gets its tag and the running tags of its references`() {
+        val json = NodePlanner.prepareOutbound(
+            """{"tag":"proxy-2","protocol":"vless","streamSettings":{"sockopt":{"dialerProxy":"proxy-1"}},"proxySettings":{"tag":"fragment"}}""",
+            tag = "proxy-2-2",
+            renamed = mapOf("proxy-1" to "proxy-7"),
+        )
+        val root = com.google.gson.JsonParser.parseString(json).asJsonObject
+        assertEquals("proxy-2-2", root.get("tag").asString)
+        assertEquals("proxy-7", root.getAsJsonObject("streamSettings").getAsJsonObject("sockopt").get("dialerProxy").asString)
+        assertEquals("fragment", root.getAsJsonObject("proxySettings").get("tag").asString)
+    }
+
+    @Test
+    fun `outbound tags include non-proxy outbounds`() {
+        assertEquals(setOf("bal-1-vless", "bal-1-wireguard", "direct", "block"), NodePlanner.outboundTags(balancedConfig))
+        assertTrue(NodePlanner.outboundTags("not json").isEmpty())
+    }
 }
 
 class NodeSelectorTest {
 
     private fun selector() = NodeSelector().apply { reset(listOf("a", "b", "c")) }
+
+    @Test
+    fun `retain keeps known servers, also under a new tag, and forgets the gone ones`() {
+        val s = selector()
+        s.record("a", true, 100)
+        s.record("b", true, 200)
+        s.record("c", true, 50)
+        s.retain(listOf("a", "x", "d"), previous = mapOf("x" to "b"))
+        assertEquals(100L, s.stats("a")?.median())
+        assertEquals(200L, s.stats("x")?.median())
+        assertEquals(0, s.stats("d")?.checks)
+        assertNull(s.stats("b"))
+        assertNull(s.stats("c"))
+        assertEquals("a", s.bestAlive())
+    }
 
     @Test
     fun `best alive server has the lowest median latency`() {

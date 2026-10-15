@@ -11,6 +11,7 @@ import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.LinkCandidate
 import io.github.du10777.tropa.data.LinkParser
+import io.github.du10777.tropa.data.RoutingPreset
 import io.github.du10777.tropa.data.SubscriptionRefresher
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.CoreState
@@ -71,6 +72,8 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { SettingsManager.initAssets(app, app.assets) }
         // Subscriptions are updated by Tropa itself, only while the VPN is on (see SubscriptionRefresher).
         SubscriptionRefresher.takeOver(app)
+        // Share-link connections: Russia directly, the rest through the VPN (instead of upstream's China preset).
+        RoutingPreset.applyOnce(app)
         viewModelScope.launch {
             combine(monitor.state, monitor.lastError, monitor.watch) { core, error, watch -> Triple(core, error, watch) }
                 .collect { (core, error, watch) ->

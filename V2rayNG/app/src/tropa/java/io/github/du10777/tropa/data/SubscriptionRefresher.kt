@@ -34,10 +34,10 @@ object SubscriptionRefresher {
     fun isDue(lastUpdated: Long, intervalMinutes: Long, now: Long): Boolean =
         now - lastUpdated >= intervalMinutes.coerceAtLeast(15) * 60_000L
 
-    /** Refreshes the subscriptions whose time has come; returns how many were downloaded. Blocking. */
-    fun refreshDue(now: Long = System.currentTimeMillis()): Int = MmkvManager.decodeSubscriptions()
+    /** Refreshes the subscriptions whose time has come; returns how each went. Blocking. */
+    fun refreshDue(now: Long = System.currentTimeMillis()): Map<String, Connections.Refresh> = MmkvManager.decodeSubscriptions()
         .filter { it.subscription.url.isNotEmpty() && isDue(it.subscription.lastUpdated, it.subscription.updateInterval, now) }
-        .count { refresh(it.guid) != Connections.Refresh.FAILED }
+        .associate { it.guid to refresh(it.guid) }
 
     /** The active connection right now, whatever its interval (servers silent: maybe they moved). */
     fun refreshActive(): Connections.Refresh =
@@ -46,8 +46,8 @@ object SubscriptionRefresher {
     /**
      * Refreshes one subscription; an unchanged one keeps its profiles. A changed one gets new
      * profile ids, so for the active connection the profile to start is picked again: a later
-     * reconnect must not look for one that is gone. The running core keeps its config until the
-     * next start.
+     * reconnect must not look for one that is gone. The running core is not restarted: the
+     * watchdog adds the new servers to it (TropaWatchdog.onSubscriptionChanged).
      */
     fun refresh(id: String): Connections.Refresh {
         val result = Connections.refresh(id, keepIfSame = true)

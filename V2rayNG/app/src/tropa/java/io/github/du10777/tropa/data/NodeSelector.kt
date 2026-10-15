@@ -43,6 +43,17 @@ class NodeSelector(
         tags.forEach { stats[it] = Stats() }
     }
 
+    /**
+     * Watches [tags] from now on: what is known about the ones watched before is kept, also for
+     * a server whose tag changed ([previous]: new tag to the old one); the rest is forgotten.
+     */
+    @Synchronized
+    fun retain(tags: Collection<String>, previous: Map<String, String> = emptyMap()) {
+        val known = LinkedHashMap(stats)
+        stats.clear()
+        tags.forEach { tag -> stats[tag] = known[previous[tag] ?: tag] ?: Stats() }
+    }
+
     @Synchronized
     fun stats(tag: String): Stats? = stats[tag]
 

@@ -234,5 +234,27 @@
     <!-- 0.8: subscription links -->
     <string name="tropa_connection_support">Support</string>
     <string name="tropa_connection_web_page">Subscription page</string>
-    <string name="tropa_log_subscription">Subscription updated, restarting</string>
+    <string name="tropa_log_subscription">Subscription updated</string>
+    <!-- 0.9: apps without VPN -->
+    <string name="tropa_apps_explain">These apps go to the internet directly, around the VPN. For example, banks and state services that do not let in foreign addresses.</string>
+    <string name="tropa_apps_add_preset">Add banks and state services</string>
+    <string name="tropa_apps_add_preset_hint">Only the ones installed on this phone</string>
+    <string name="tropa_apps_add">Add an app</string>
+    <string name="tropa_apps_empty">The list is empty: all apps go through the VPN.</string>
+    <string name="tropa_apps_not_installed">%1$s · not installed</string>
+    <string name="tropa_apps_remove">Remove</string>
+    <string name="tropa_apps_search">Search</string>
+    <string name="tropa_apps_preset_none">None of the banks and state services from the list is installed, or they are all added already.</string>
+    <plurals name="tropa_apps_preset_added">
+        <item quantity="one">%d app added</item>
+        <item quantity="other">%d apps added</item>
+    </plurals>
+    <string name="tropa_apps_restart_note">The VPN reconnects to apply the changes when you leave this screen.</string>
+    <string name="tropa_apps_reversed">The list was set up the other way round in the advanced mode: only the selected apps (%d) go through the VPN.</string>
+    <string name="tropa_apps_reversed_reset">Start a list of apps without VPN</string>
+    <string name="tropa_apps_none">None</string>
+    <plurals name="tropa_apps_count">
+        <item quantity="one">%d app</item>
+        <item quantity="other">%d apps</item>
+    </plurals>
 </resources>

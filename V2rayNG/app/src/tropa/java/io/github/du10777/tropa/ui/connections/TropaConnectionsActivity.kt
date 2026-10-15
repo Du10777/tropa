@@ -43,7 +43,9 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.Connections
+import io.github.du10777.tropa.data.SubscriptionRefresher
 import io.github.du10777.tropa.data.TropaPrefs
+import io.github.du10777.tropa.service.TropaServiceEventsReceiver
 import io.github.du10777.tropa.ui.common.ActionRow
 import io.github.du10777.tropa.ui.common.ConfirmDialog
 import io.github.du10777.tropa.ui.common.TropaTopBar
@@ -143,16 +145,13 @@ class TropaConnectionsActivity : BaseComponentActivity() {
         if (refreshing != null) return
         refreshing = connection.id
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { Connections.refresh(connection.id) != Connections.Refresh.FAILED }
+            val result = withContext(Dispatchers.IO) { SubscriptionRefresher.refresh(connection.id) }
             refreshing = null
-            toast(if (ok) R.string.tropa_connection_updated else R.string.tropa_connection_update_failed)
+            toast(if (result != Connections.Refresh.FAILED) R.string.tropa_connection_updated else R.string.tropa_connection_update_failed)
             reload()
-            // Server profiles are recreated by an update: point the running tunnel at a live one.
-            if (ok && connection.id == activeId && tunnelUp) {
-                Connections.serverToStart(connection.id)?.let { guid ->
-                    MmkvManager.setSelectServer(guid)
-                    LauncherManager.restartService(this@TropaConnectionsActivity)
-                }
+            // The running tunnel takes the new servers over without a restart.
+            if (result == Connections.Refresh.UPDATED && connection.id == activeId && tunnelUp) {
+                TropaServiceEventsReceiver.subscriptionChanged(this@TropaConnectionsActivity)
             }
         }
     }

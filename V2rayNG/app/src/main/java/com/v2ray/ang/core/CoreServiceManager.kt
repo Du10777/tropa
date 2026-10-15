@@ -269,6 +269,8 @@ object CoreServiceManager {
 
             coreController.stopLoop()
             launchCore(service, tunFd, isReload = true)
+            // FORK: the Tropa watchdog puts its server choice back into the restarted core right away.
+            io.github.du10777.tropa.service.TropaWatchdog.wakeUp()
 
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload finished")
             true

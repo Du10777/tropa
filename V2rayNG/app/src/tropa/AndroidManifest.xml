@@ -109,6 +109,10 @@
             android:name="io.github.du10777.tropa.ui.settings.TropaProxyActivity"
             android:exported="false" />
         <activity
+            android:name="io.github.du10777.tropa.ui.settings.TropaAppsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name="io.github.du10777.tropa.ui.settings.TropaGeoActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
@@ -125,6 +129,7 @@
             <intent-filter>
                 <action android:name="${applicationId}.action.activity" />
                 <action android:name="io.github.du10777.tropa.action.WAKE_WATCHDOG" />
+                <action android:name="io.github.du10777.tropa.action.SUBSCRIPTION_CHANGED" />
             </intent-filter>
         </receiver>
 
