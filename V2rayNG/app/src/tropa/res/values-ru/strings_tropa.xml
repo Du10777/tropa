@@ -281,4 +281,27 @@
     <string name="tropa_settings_updates_checking">Проверяю…</string>
     <string name="tropa_update_latest">У вас последняя версия</string>
     <string name="tropa_update_check_failed">Не удалось проверить обновления</string>
+    <!-- 0.11: роуминг и слабая сеть -->
+    <string name="tropa_status_paused_weak">Проверки на паузе: мобильная сеть хуже 4G</string>
+    <string name="tropa_status_paused_roaming">Проверки на паузе: роуминг</string>
+    <string name="tropa_status_roaming">Роуминг: передача данных остановлена</string>
+    <string name="tropa_status_roaming_hint">Трафик через Тропу остановлен, VPN включён. Нажмите, чтобы решить.</string>
+    <string name="tropa_roaming_dialog_title">Вы в роуминге</string>
+    <string name="tropa_roaming_dialog_text">Уверены, что хотите передавать данные?</string>
+    <string name="tropa_roaming_dialog_usage">За последний месяц вы в среднем тратили %1$s в день.</string>
+    <string name="tropa_roaming_continue">Продолжить</string>
+    <string name="tropa_roaming_later">Не сейчас</string>
+    <string name="tropa_roaming_notify_title">Вы в роуминге</string>
+    <string name="tropa_roaming_notify_text">Трафик через Тропу остановлен. Нажмите, чтобы решить.</string>
+    <string name="tropa_roaming_title">Роуминг</string>
+    <string name="tropa_roaming_summary_stop">Трафик останавливается до вашего согласия</string>
+    <string name="tropa_roaming_summary_off">Трафик не останавливается</string>
+    <string name="tropa_roaming_explain">Роуминг — это мобильная связь в другой стране. Wi-Fi за границей роумингом не считается. Приложения без VPN не останавливаются: они идут мимо Тропы.</string>
+    <string name="tropa_roaming_stop">Останавливать трафик в роуминге</string>
+    <string name="tropa_roaming_stop_hint">За границей по мобильной связи трафик через Тропу встаёт, пока вы не согласитесь для этой страны. VPN остаётся включённым, поэтому приложения не пойдут в интернет мимо него. Дома согласие забывается.</string>
+    <string name="tropa_roaming_checks">Проверять соединение в роуминге</string>
+    <string name="tropa_roaming_checks_hint">Проверки тратят около 2 МБ в час.</string>
+    <string name="tropa_log_roaming">Роуминг</string>
+    <string name="tropa_log_paused_weak">Проверки на паузе: слабая сеть</string>
+    <string name="tropa_log_paused_roaming">Проверки на паузе: роуминг</string>
 </resources>

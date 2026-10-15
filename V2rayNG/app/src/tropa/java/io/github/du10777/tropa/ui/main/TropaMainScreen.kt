@@ -83,6 +83,7 @@ import com.v2ray.ang.R
 import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.service.CoreState
+import io.github.du10777.tropa.service.TropaWatchdog
 import io.github.du10777.tropa.service.WatchPhase
 import io.github.du10777.tropa.service.WatchState
 import io.github.du10777.tropa.ui.common.ActionRow
@@ -113,6 +114,8 @@ class MainActions(
     val onOpenGeo: (GeoRef) -> Unit = {},
     val onDismissAnnounce: () -> Unit = {},
     val onOpenUrl: (String) -> Unit = {},
+    /** Roaming stopped the traffic: ask again whether to go on. */
+    val onRoaming: () -> Unit = {},
 )
 
 /**
@@ -227,12 +230,20 @@ private fun ConnectionContent(state: MainUiState, actions: MainActions) {
     state.announce?.let { AnnounceBanner(it, actions.onDismissAnnounce) }
     if (state.clipOffer != null) ClipboardBanner(actions)
     val online = state.core == CoreState.Running &&
-        (state.watch?.phase == WatchPhase.CONNECTED || state.watch?.phase == WatchPhase.CHECKS_OFF)
+        state.watch?.phase.let { it == WatchPhase.CONNECTED || it == WatchPhase.CHECKS_OFF || it == WatchPhase.PAUSED }
     if (online) {
         OnlineStats(state.watch?.connectedAt?.takeIf { it > 0 } ?: state.connectedSince, state.watch)
         TrafficCard(state.watch)
     }
-    StatusBlock(state, onClick = if (state.active != null) actions.onShowDetails else null)
+    val roaming = state.core == CoreState.Running && state.watch?.phase == WatchPhase.ROAMING
+    StatusBlock(
+        state,
+        onClick = when {
+            roaming -> actions.onRoaming
+            state.active != null -> actions.onShowDetails
+            else -> null
+        },
+    )
     state.active?.let { ConnectionCard(it, state, actions) }
 }
 
@@ -343,8 +354,8 @@ private fun statusLook(state: MainUiState): StatusLook = when (state.core) {
     CoreState.Stopped, CoreState.Unknown -> StatusLook.IDLE
     CoreState.Running -> when (state.watch?.phase) {
         null, WatchPhase.CHECKING -> StatusLook.PROGRESS
-        WatchPhase.CONNECTED, WatchPhase.CHECKS_OFF -> StatusLook.GOOD
-        WatchPhase.NO_SERVER, WatchPhase.NO_INTERNET -> StatusLook.BAD
+        WatchPhase.CONNECTED, WatchPhase.CHECKS_OFF, WatchPhase.PAUSED -> StatusLook.GOOD
+        WatchPhase.NO_SERVER, WatchPhase.NO_INTERNET, WatchPhase.ROAMING -> StatusLook.BAD
     }
 }
 
@@ -414,6 +425,16 @@ private fun StatusBlock(state: MainUiState, onClick: (() -> Unit)? = null) {
             WatchPhase.CHECKS_OFF -> {
                 title = stringResource(R.string.tropa_status_connected)
                 hint = stringResource(R.string.tropa_status_checks_off_hint)
+            }
+
+            WatchPhase.PAUSED -> {
+                title = stringResource(R.string.tropa_status_connected)
+                hint = stringResource(if (watch.pause == TropaWatchdog.PAUSE_ROAMING) R.string.tropa_status_paused_roaming else R.string.tropa_status_paused_weak)
+            }
+
+            WatchPhase.ROAMING -> {
+                title = stringResource(R.string.tropa_status_roaming)
+                hint = stringResource(R.string.tropa_status_roaming_hint)
             }
         }
     }

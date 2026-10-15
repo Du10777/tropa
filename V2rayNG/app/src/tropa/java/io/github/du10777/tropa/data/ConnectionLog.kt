@@ -176,13 +176,16 @@ object ConnectionLog {
     }
 
     /** Events that mark sessions and changes rather than checks: shown as chips. */
-    val SESSION_KINDS = setOf("start", "stop", "connected", "no_server", "no_internet", "reload", "switch", "network", "servers", "level", "subscription")
+    val SESSION_KINDS = setOf(
+        "start", "stop", "connected", "no_server", "no_internet", "reload", "switch", "network", "servers", "level",
+        "subscription", "roaming", "paused",
+    )
 
     /** Small notes: shown as plain grey lines. */
     val NOTE_KINDS = setOf("screen_on", "screen_off", "core")
 
-    /** Kinds whose target is part of the title (network type, log level). */
-    private val TARGET_IN_TITLE = setOf("network", "level")
+    /** Kinds whose target is part of the title (network type, log level, why the checks pause). */
+    private val TARGET_IN_TITLE = setOf("network", "level", "paused")
 
     /** The headline of an event: "Network: Wi-Fi", "Log level: Debug", "Latency". */
     fun title(context: Context, e: ProbeEvent): String = when (e.kind) {
@@ -191,6 +194,7 @@ object ConnectionLog {
             R.string.tropa_log_level_changed,
             LogLevel.entries.firstOrNull { it.name == e.target }?.let { context.getString(it.title) } ?: e.target,
         )
+        "paused" -> context.getString(if (e.target == "roaming") R.string.tropa_log_paused_roaming else R.string.tropa_log_paused_weak)
         else -> kindLabel(context, e.kind)
     }
 
@@ -220,6 +224,7 @@ object ConnectionLog {
             "screen_off" -> R.string.tropa_log_screen_off
             "core" -> R.string.tropa_log_core
             "subscription" -> R.string.tropa_log_subscription
+            "roaming" -> R.string.tropa_log_roaming
             else -> R.string.tropa_log_reload
         }
     )

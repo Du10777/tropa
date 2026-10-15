@@ -12,11 +12,14 @@ import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.LinkCandidate
 import io.github.du10777.tropa.data.LinkParser
+import io.github.du10777.tropa.data.Roaming
 import io.github.du10777.tropa.data.RoutingPreset
 import io.github.du10777.tropa.data.SubscriptionRefresher
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.CoreState
 import io.github.du10777.tropa.service.ServiceStateMonitor
+import io.github.du10777.tropa.service.TropaServiceEventsReceiver
+import io.github.du10777.tropa.service.WatchPhase
 import io.github.du10777.tropa.service.WatchState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +56,9 @@ data class MainUiState(
     val announce: String? = null,
     /** A newer Tropa version to offer, with its download. */
     val update: UpdateOffer? = null,
+    /** Roaming stopped the traffic: the question is shown, with the mobile data per day if known. */
+    val roamingAsk: Boolean = false,
+    val roamingDailyBytes: Long? = null,
 )
 
 /** A newer Tropa version offered on the main screen, and how its download goes. */
@@ -87,6 +93,12 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
     private var updateCheck: Job? = null
     private var updateDownload: Job? = null
 
+    /** The roaming country whose question was answered "Not now" in this run of the screen. */
+    private var roamingDismissed: String? = null
+
+    /** The roaming country the mobile data per day was looked up for. */
+    private var roamingUsageFor: String? = null
+
     init {
         reload()
         monitor.start()
@@ -100,13 +112,27 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             combine(monitor.state, monitor.lastError, monitor.watch) { core, error, watch -> Triple(core, error, watch) }
                 .collect { (core, error, watch) ->
+                    val roamingMcc = watch?.roamingMcc?.takeIf { core == CoreState.Running && watch.phase == WatchPhase.ROAMING }
                     _state.update {
                         it.copy(
                             core = core,
                             error = error,
                             connectedSince = TropaPrefs.connectedSince,
                             watch = watch.takeIf { core == CoreState.Running },
+                            roamingAsk = when {
+                                roamingMcc == null -> false
+                                it.roamingAsk -> true
+                                else -> roamingMcc != roamingDismissed
+                            },
                         )
+                    }
+                    if (roamingMcc != null && state.value.roamingAsk && roamingUsageFor != roamingMcc) {
+                        roamingUsageFor = roamingMcc
+                        viewModelScope.launch(Dispatchers.IO) {
+                            // Nothing used over mobile data yet (or unknown): the dialog leaves the line out.
+                            val bytes = Roaming.averageDailyMobileBytes(getApplication())?.takeIf { it > 0 }
+                            _state.update { it.copy(roamingDailyBytes = bytes) }
+                        }
                     }
                 }
         }
@@ -151,6 +177,23 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    /** "Continue" in roaming: data may go through Tropa in this country, the watchdog lifts the block. */
+    fun allowRoaming() {
+        val mcc = state.value.watch?.roamingMcc ?: return
+        Roaming.allowedMcc = mcc
+        TropaServiceEventsReceiver.wakeWatchdog(getApplication())
+        _state.update { it.copy(roamingAsk = false) }
+    }
+
+    fun dismissRoaming() {
+        roamingDismissed = state.value.watch?.roamingMcc
+        _state.update { it.copy(roamingAsk = false) }
+    }
+
+    fun askRoamingAgain() {
+        _state.update { it.copy(roamingAsk = it.watch?.phase == WatchPhase.ROAMING) }
     }
 
     fun postponeUpdate() {

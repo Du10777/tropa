@@ -60,6 +60,7 @@ import io.github.du10777.tropa.data.BypassApps
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.LocalProxy
+import io.github.du10777.tropa.data.Roaming
 import io.github.du10777.tropa.ui.log.TropaLogActivity
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.WatchStateStore
@@ -80,6 +81,7 @@ class TropaSettingsActivity : BaseComponentActivity() {
     private var updatesOn by mutableStateOf(AppUpdates.enabled)
     private var checkingUpdate by mutableStateOf(false)
     private var availableVersion by mutableStateOf(AppUpdates.available()?.version)
+    private var roamingStop by mutableStateOf(Roaming.stopTraffic)
 
     override fun onResume() {
         super.onResume()
@@ -87,6 +89,7 @@ class TropaSettingsActivity : BaseComponentActivity() {
         proxy = LocalProxy.userProxy
         bypassApps = if (BypassApps.reversed) 0 else BypassApps.packages().size
         availableVersion = AppUpdates.available()?.version
+        roamingStop = Roaming.stopTraffic
     }
 
     /** Tapping the row checks right away; a newer version opens the main screen, which offers it. */
@@ -149,6 +152,13 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         }
                         SettingsRow(R.drawable.ic_check_update_24dp, stringResource(R.string.tropa_settings_checks), null) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaChecksActivity::class.java))
+                        }
+                        SettingsRow(
+                            R.drawable.ic_routing_24dp,
+                            stringResource(R.string.tropa_roaming_title),
+                            stringResource(if (roamingStop) R.string.tropa_roaming_summary_stop else R.string.tropa_roaming_summary_off),
+                        ) {
+                            startActivity(Intent(this@TropaSettingsActivity, TropaRoamingActivity::class.java))
                         }
                         SettingsRow(R.drawable.ic_description_24dp, stringResource(R.string.tropa_log_title), stringResource(logLevel.title)) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaLogActivity::class.java))

@@ -20,6 +20,7 @@ object TropaNotifier {
     private const val NOTIFICATION_ID = 4201
     private const val UPDATE_CHANNEL_ID = "tropa_updates"
     private const val UPDATE_NOTIFICATION_ID = 4202
+    private const val ROAMING_NOTIFICATION_ID = 4203
     private const val RESTORED_TIMEOUT_MS = 10_000L
 
     fun notifyLost(context: Context) =
@@ -38,8 +39,20 @@ object TropaNotifier {
         timeoutMs = null,
     )
 
+    /** Traffic stopped in roaming; opens the main screen, which asks whether to go on. */
+    fun notifyRoaming(context: Context) = post(
+        context, CHANNEL_ID, ROAMING_NOTIFICATION_ID,
+        context.getString(R.string.tropa_roaming_notify_title), context.getString(R.string.tropa_roaming_notify_text),
+        timeoutMs = null,
+    )
+
+    fun cancelRoaming(context: Context) {
+        NotificationManagerCompat.from(context).cancel(ROAMING_NOTIFICATION_ID)
+    }
+
     fun cancel(context: Context) {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+        cancelRoaming(context)
     }
 
     private fun post(context: Context, channel: String, id: Int, title: String, text: String, timeoutMs: Long?) {

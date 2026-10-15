@@ -21,6 +21,12 @@ enum class WatchPhase {
 
     /** Checks are turned off in the settings. */
     CHECKS_OFF,
+
+    /** The checks pause by themselves (WatchState.pause): mobile data slower than 4G, or roaming. */
+    PAUSED,
+
+    /** Roaming in a country the user has not agreed to: traffic through Tropa is stopped, the VPN stays up. */
+    ROAMING,
 }
 
 data class WatchNode(
@@ -37,7 +43,8 @@ data class ProbeEvent(
     /**
      * Checks: latency | download | direct. Session: start | stop | connected | no_server |
      * no_internet | reload | switch (detail: why) | subscription (the active one changed, detail:
-     * what was done with it).
+     * what was done with it) | roaming (target = network MCC, ok = traffic allowed) | paused
+     * (target = weak | roaming).
      * Details: network (target = wifi | cellular | ethernet | none | other, ok = validated by
      * Android) | servers | screen_on | screen_off | core (Xray message).
      */
@@ -69,6 +76,10 @@ data class WatchState(
     /** Bytes of the app (which carries all VPN traffic) when the session started. */
     val trafficBaseRx: Long = 0L,
     val trafficBaseTx: Long = 0L,
+    /** Why the checks pause (TropaWatchdog.PAUSE_*), in the PAUSED phase. */
+    val pause: String? = null,
+    /** The country (MCC) of the roaming network, in the ROAMING phase. */
+    val roamingMcc: String? = null,
 )
 
 /**

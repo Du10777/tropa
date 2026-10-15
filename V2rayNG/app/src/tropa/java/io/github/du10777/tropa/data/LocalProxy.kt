@@ -78,11 +78,15 @@ object LocalProxy {
 
     fun token(length: Int): String = buildString { repeat(length) { append(ALPHABET[random.nextInt(ALPHABET.length)]) } }
 
-    /** The config the core starts with: local inbounds replaced as described above. */
+    /**
+     * The config the core starts with: local inbounds replaced as described above, and in roaming
+     * without the user's consent everything blocked (see [Roaming]).
+     */
     fun patchConfig(config: String): String {
         val user = SettingsManager.getSocksUsername() ?: return config
         val pass = SettingsManager.getSocksPassword() ?: return config
-        return patch(config, Internal(SettingsManager.getSocksPort(), user, pass), userProxy.takeIf { it.enabled })
+        val patched = patch(config, Internal(SettingsManager.getSocksPort(), user, pass), userProxy.takeIf { it.enabled })
+        return if (Roaming.blocked) Roaming.blockAll(patched) else patched
     }
 
     internal fun patch(config: String, internal: Internal, user: UserProxy?): String {

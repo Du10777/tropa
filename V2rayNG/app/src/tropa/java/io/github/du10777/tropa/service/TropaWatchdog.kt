@@ -21,6 +21,7 @@ import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.util.LogUtil
 import io.github.du10777.tropa.data.AppUpdates
+import io.github.du10777.tropa.data.Cellular
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.Connections
@@ -30,6 +31,7 @@ import io.github.du10777.tropa.data.NodePlan
 import io.github.du10777.tropa.data.NodePlanner
 import io.github.du10777.tropa.data.NodeSelector
 import io.github.du10777.tropa.data.ProblemReports
+import io.github.du10777.tropa.data.Roaming
 import io.github.du10777.tropa.data.SubscriptionRefresher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +62,7 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_WAKE -> return TropaWatchdog.wakeUp()
             ACTION_SUBSCRIPTION_CHANGED -> return TropaWatchdog.onSubscriptionChanged()
+            ACTION_TEST_CELLULAR -> return testCellular(intent)
         }
         when (intent.getIntExtra("key", 0)) {
             AppConfig.MSG_STATE_START_SUCCESS -> TropaWatchdog.start(context)
@@ -71,6 +74,13 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
         const val ACTION_WAKE = "io.github.du10777.tropa.action.WAKE_WATCHDOG"
         const val ACTION_SUBSCRIPTION_CHANGED = "io.github.du10777.tropa.action.SUBSCRIPTION_CHANGED"
 
+        /**
+         * Test bench without a SIM: pretend a mobile network (extras network_mcc, home_mcc,
+         * generation 2g/3g/4g/5g; clear=true goes back to the real one). The receiver is not
+         * exported, so only root or the system can send it (adb root + am broadcast -n).
+         */
+        const val ACTION_TEST_CELLULAR = "io.github.du10777.tropa.action.TEST_CELLULAR"
+
         /** Lets the watchdog (VPN service process) pick up changed settings right away. */
         fun wakeWatchdog(context: Context) {
             context.sendBroadcast(Intent(ACTION_WAKE).setPackage(context.packageName))
@@ -79,6 +89,22 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
         /** The active subscription was updated in the UI: the running tunnel takes its servers over. */
         fun subscriptionChanged(context: Context) {
             context.sendBroadcast(Intent(ACTION_SUBSCRIPTION_CHANGED).setPackage(context.packageName))
+        }
+
+        private fun testCellular(intent: Intent) {
+            Cellular.override = if (intent.getBooleanExtra("clear", false)) null else Cellular.State(
+                cellular = true,
+                networkMcc = intent.getStringExtra("network_mcc"),
+                homeMcc = intent.getStringExtra("home_mcc"),
+                generation = when (intent.getStringExtra("generation")) {
+                    "2g" -> Cellular.Generation.G2
+                    "3g" -> Cellular.Generation.G3
+                    "4g" -> Cellular.Generation.G4
+                    "5g" -> Cellular.Generation.G5
+                    else -> Cellular.Generation.UNKNOWN
+                },
+            )
+            TropaWatchdog.wakeUp()
         }
     }
 }
@@ -116,6 +142,13 @@ object TropaWatchdog {
 
     /** While connected, due subscriptions are looked for this often (and when the connection comes up). */
     private const val SUBSCRIPTION_CHECK_MS = 30 * 60_000L
+
+    /** Paused checks and stopped roaming traffic look at the network this often (network changes wake up at once). */
+    private const val PAUSE_RECHECK_MS = 30_000L
+
+    /** Why the checks pause (WatchState.pause). */
+    const val PAUSE_WEAK = "weak"
+    const val PAUSE_ROAMING = "roaming"
 
     private var scope: CoroutineScope? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -320,6 +353,11 @@ object TropaWatchdog {
 
         /** The active server left the subscription: new connections move on once another one answers. */
         private var leaving: String? = null
+
+        /** Why the checks pause right now (PAUSE_*), and the country of a roaming network that stopped the traffic. */
+        private var pauseReason: String? = null
+        private var roamingMcc: String? = null
+        private var loggedPause: String? = null
         /** Last outcome and last written check of each server, to keep steady periods short in the log. */
         private val lastOutcome = ConcurrentHashMap<String, Boolean>()
         private val lastWrittenAt = ConcurrentHashMap<String, Long>()
@@ -343,7 +381,14 @@ object TropaWatchdog {
             loadPlan()
             var attempt = 0
             while (currentCoroutineContext().isActive) {
-                if (!CheckSettings.enabled) {
+                val cell = cellular()
+                if (guardRoaming(cell)) {
+                    connectedAt = 0L
+                    waitForWake(PAUSE_RECHECK_MS)
+                    continue
+                }
+                pauseReason = pauseReasonOf(cell)
+                if (!CheckSettings.enabled || pauseReason != null) {
                     if (connectedAt == 0L) {
                         connectedAt = System.currentTimeMillis()
                         scope.launch {
@@ -352,16 +397,16 @@ object TropaWatchdog {
                         }
                     }
                     if (subscriptionChanged.getAndSet(false)) applyUnchecked()
-                    publish(WatchPhase.CHECKS_OFF)
-                    waitForWake(CHECKS_OFF_RECHECK_MS)
+                    publish(if (pauseReason != null) WatchPhase.PAUSED else WatchPhase.CHECKS_OFF)
+                    waitForWake(if (pauseReason != null) PAUSE_RECHECK_MS else CHECKS_OFF_RECHECK_MS)
                     continue
                 }
                 if (attempt == 0) publish(WatchPhase.CHECKING)
                 if (establish()) {
                     attempt = 0
                     onConnected()
-                    monitor()
-                    if (!CheckSettings.enabled) continue
+                    // Back to the top when the checks pause or stop; otherwise every server is dead.
+                    if (monitor()) continue
                 }
                 attempt++
                 if (!internetUp()) {
@@ -412,6 +457,48 @@ object TropaWatchdog {
                 val names = plan.nodes.joinToString(", ") { it.name.ifEmpty { it.tag.ifEmpty { "?" } } }
                 record(ProbeEvent(System.currentTimeMillis(), "servers", "", null, "", ok = true, detail = names + (if (plan.balancerTag != null) " · balancer" else "")))
             }
+        }
+
+        /** The mobile side of the network under the VPN: country and generation. */
+        private fun cellular(): Cellular.State {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return Cellular.read(context, null)
+            val caps = runCatching { underlyingNetwork(cm)?.let { cm.getNetworkCapabilities(it) } }.getOrNull()
+            return Cellular.read(context, caps)
+        }
+
+        /**
+         * Abroad on mobile data without the user's consent for that country, everything through
+         * Tropa stops while the VPN stays up: the core restarts in place with a config that blocks
+         * all connections (LocalProxy.patchConfig). Returns whether the traffic is stopped now.
+         */
+        private fun guardRoaming(cell: Cellular.State): Boolean {
+            // On the home network again the consents given abroad are forgotten.
+            if (cell.home && Roaming.allowedMcc.isNotEmpty()) Roaming.allowedMcc = ""
+            val block = Roaming.mustBlock(cell)
+            if (block != Roaming.blocked) {
+                Roaming.blocked = block
+                record(
+                    ProbeEvent(
+                        System.currentTimeMillis(), "roaming", "", null, cell.networkMcc.orEmpty(), ok = !block,
+                        detail = if (block) "traffic stopped" else "traffic allowed",
+                    ),
+                )
+                reloadCore()
+                loadPlan()
+                if (block) TropaNotifier.notifyRoaming(context) else TropaNotifier.cancelRoaming(context)
+            }
+            if (block) {
+                roamingMcc = cell.networkMcc
+                publish(WatchPhase.ROAMING)
+            }
+            return block
+        }
+
+        /** Why the checks pause: roaming without checks there, or mobile data slower than 4G; null when they run. */
+        private fun pauseReasonOf(cell: Cellular.State): String? = when {
+            !Roaming.checksAllowed(cell) -> PAUSE_ROAMING
+            cell.weak -> PAUSE_WEAK
+            else -> null
         }
 
         private fun savedConfig(): String? {
@@ -666,14 +753,19 @@ object TropaWatchdog {
             if (phase == WatchPhase.CONNECTED) publish(WatchPhase.CONNECTED)
         }
 
-        /** Watches the active server while things work; returns when every server is dead. */
-        private suspend fun monitor() {
+        /**
+         * Watches the active server while things work. Returns true when the checks pause or stop
+         * (turned off, weak network, roaming), false when every server is dead.
+         */
+        private suspend fun monitor(): Boolean {
             var nextDelay = intervalMs()
             while (currentCoroutineContext().isActive && CheckSettings.enabled) {
                 waitForWake(nextDelay)
+                val cell = cellular()
+                if (!CheckSettings.enabled || Roaming.mustBlock(cell) || pauseReasonOf(cell) != null) return true
                 ensureOverride()
                 if (subscriptionChanged.getAndSet(false)) applySubscription()
-                val tag = activeTag ?: return
+                val tag = activeTag ?: return false
                 val othersDue = plan.isBalanced && screenOn &&
                     System.currentTimeMillis() - lastOthersAt >= CheckSettings.othersIntervalSec * 1000L
                 // All servers are checked at the same time, the active one included.
@@ -702,7 +794,7 @@ object TropaWatchdog {
                         if (decision.reason == NodeSelector.Reason.BETTER) "faster" else "previous one is down",
                     )
 
-                    NodeSelector.Decision.AllDead -> return
+                    NodeSelector.Decision.AllDead -> return false
                 }
                 leaving?.let { gone ->
                     moveOff(gone)
@@ -710,6 +802,7 @@ object TropaWatchdog {
                 }
                 nextDelay = if (result.ok) intervalMs() else RETRY_AFTER_FAILURE_MS
             }
+            return true
         }
 
         private fun intervalMs(): Long =
@@ -943,6 +1036,10 @@ object TropaWatchdog {
             if (phase != this.phase && (phase == WatchPhase.NO_SERVER || phase == WatchPhase.NO_INTERNET)) {
                 record(ProbeEvent(System.currentTimeMillis(), if (phase == WatchPhase.NO_SERVER) "no_server" else "no_internet", "", null, "", ok = false))
             }
+            if (phase == WatchPhase.PAUSED && (this.phase != WatchPhase.PAUSED || pauseReason != loggedPause)) {
+                record(ProbeEvent(System.currentTimeMillis(), "paused", "", null, pauseReason.orEmpty(), ok = true))
+            }
+            loggedPause = pauseReason.takeIf { phase == WatchPhase.PAUSED }
             this.phase = phase
             WatchStateStore.publish(context, currentState(phase, attempt, nextRetryAt))
         }
@@ -970,7 +1067,9 @@ object TropaWatchdog {
                     nodes = nodes,
                     alwaysOn = if (q) vpn?.isAlwaysOn else null,
                     lockdown = if (q) vpn?.isLockdownEnabled else null,
-                    connectedAt = if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF) connectedAt else 0L,
+                    connectedAt = if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF || phase == WatchPhase.PAUSED) connectedAt else 0L,
+                    pause = pauseReason.takeIf { phase == WatchPhase.PAUSED },
+                    roamingMcc = roamingMcc.takeIf { phase == WatchPhase.ROAMING },
                     trafficBaseRx = trafficBaseRx,
                     trafficBaseTx = trafficBaseTx,
                 )

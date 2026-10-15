@@ -111,6 +111,9 @@
             android:name="io.github.du10777.tropa.ui.settings.TropaProxyActivity"
             android:exported="false" />
         <activity
+            android:name="io.github.du10777.tropa.ui.settings.TropaRoamingActivity"
+            android:exported="false" />
+        <activity
             android:name="io.github.du10777.tropa.ui.settings.TropaAppsActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />

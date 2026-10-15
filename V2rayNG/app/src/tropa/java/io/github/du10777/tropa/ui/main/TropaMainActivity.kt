@@ -162,8 +162,12 @@ class TropaMainActivity : HelperBaseComponentActivity() {
                     onShareLog = { LogActions.share(this) },
                     onOpenLog = { startActivity(Intent(this, TropaLogActivity::class.java)) },
                     onOpenGeo = { ref -> startActivity(TropaGeoActivity.intent(this, ref.file, ref.code)) },
+                    onRoaming = viewModel::askRoamingAgain,
                 ),
             )
+            if (state.roamingAsk) {
+                RoamingDialog(dailyBytes = state.roamingDailyBytes, onContinue = viewModel::allowRoaming, onLater = viewModel::dismissRoaming)
+            }
             state.update?.let { offer ->
                 UpdateDialog(
                     offer = offer,

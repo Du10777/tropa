@@ -278,4 +278,27 @@
     <string name="tropa_settings_updates_checking">Checking…</string>
     <string name="tropa_update_latest">You have the latest version</string>
     <string name="tropa_update_check_failed">Could not check for updates</string>
+    <!-- 0.11: roaming and weak network -->
+    <string name="tropa_status_paused_weak">Checks paused: mobile network slower than 4G</string>
+    <string name="tropa_status_paused_roaming">Checks paused: roaming</string>
+    <string name="tropa_status_roaming">Roaming: data stopped</string>
+    <string name="tropa_status_roaming_hint">Traffic through Tropa is stopped, the VPN stays on. Tap to decide.</string>
+    <string name="tropa_roaming_dialog_title">You are roaming</string>
+    <string name="tropa_roaming_dialog_text">Are you sure you want to transfer data?</string>
+    <string name="tropa_roaming_dialog_usage">Over the last month you used %1$s a day on average.</string>
+    <string name="tropa_roaming_continue">Continue</string>
+    <string name="tropa_roaming_later">Not now</string>
+    <string name="tropa_roaming_notify_title">You are roaming</string>
+    <string name="tropa_roaming_notify_text">Traffic through Tropa is stopped. Tap to decide.</string>
+    <string name="tropa_roaming_title">Roaming</string>
+    <string name="tropa_roaming_summary_stop">Traffic stops until you agree</string>
+    <string name="tropa_roaming_summary_off">Traffic is not stopped</string>
+    <string name="tropa_roaming_explain">Roaming means mobile data in another country. Wi-Fi abroad is not roaming. Apps without VPN are not stopped: they do not go through Tropa.</string>
+    <string name="tropa_roaming_stop">Stop traffic in roaming</string>
+    <string name="tropa_roaming_stop_hint">Abroad on mobile data, traffic through Tropa stops until you agree for that country. The VPN stays on, so apps do not go around it. Back home, the consent is forgotten.</string>
+    <string name="tropa_roaming_checks">Check the connection in roaming</string>
+    <string name="tropa_roaming_checks_hint">The checks use about 2 MB an hour.</string>
+    <string name="tropa_log_roaming">Roaming</string>
+    <string name="tropa_log_paused_weak">Checks paused: weak network</string>
+    <string name="tropa_log_paused_roaming">Checks paused: roaming</string>
 </resources>
