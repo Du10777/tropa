@@ -171,7 +171,8 @@ class TropaMainActivity : HelperBaseComponentActivity() {
             state.update?.let { offer ->
                 UpdateDialog(
                     offer = offer,
-                    onChangelog = { openUrl(offer.release.page) },
+                    // All releases: whoever skipped versions sees every change since theirs.
+                    onChangelog = { openUrl(AppUpdates.RELEASES_PAGE) },
                     onUpdate = ::startUpdate,
                     onCancel = viewModel::cancelUpdate,
                     onLater = viewModel::postponeUpdate,

@@ -7,11 +7,13 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.v2ray.ang.R
+import io.github.du10777.tropa.data.AppUpdates
 import io.github.du10777.tropa.ui.main.TropaMainActivity
 
 /** Silent notifications: losing and regaining the connection, a new Tropa version (own channels, no sound). */
@@ -32,12 +34,20 @@ object TropaNotifier {
         timeoutMs = RESTORED_TIMEOUT_MS,
     )
 
-    /** Opens the main screen, which offers the update. */
+    /** Opens the main screen, which offers the update; "What's new" opens the release list. */
     fun notifyUpdate(context: Context, version: String) = post(
         context, UPDATE_CHANNEL_ID, UPDATE_NOTIFICATION_ID,
         context.getString(R.string.tropa_update_notify_title), context.getString(R.string.tropa_update_notify_text, version),
         timeoutMs = null,
-    )
+    ) { builder ->
+        val releases = PendingIntent.getActivity(
+            context,
+            UPDATE_NOTIFICATION_ID + 100,
+            Intent(Intent.ACTION_VIEW, Uri.parse(AppUpdates.RELEASES_PAGE)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        builder.addAction(0, context.getString(R.string.tropa_update_changelog), releases)
+    }
 
     /** Traffic stopped in roaming; opens the main screen, which asks whether to go on. */
     fun notifyRoaming(context: Context) = post(
@@ -55,7 +65,15 @@ object TropaNotifier {
         cancelRoaming(context)
     }
 
-    private fun post(context: Context, channel: String, id: Int, title: String, text: String, timeoutMs: Long?) {
+    private fun post(
+        context: Context,
+        channel: String,
+        id: Int,
+        title: String,
+        text: String,
+        timeoutMs: Long?,
+        extra: (NotificationCompat.Builder) -> Unit = {},
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -75,6 +93,7 @@ object TropaNotifier {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .apply { if (timeoutMs != null) setTimeoutAfter(timeoutMs) }
+            .also(extra)
             .build()
         try {
             NotificationManagerCompat.from(context).notify(id, notification)

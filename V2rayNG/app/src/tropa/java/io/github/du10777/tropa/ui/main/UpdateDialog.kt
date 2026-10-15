@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.v2ray.ang.R
 import io.github.du10777.tropa.data.ConnectionLog
@@ -52,6 +53,7 @@ fun UpdateDialog(offer: UpdateOffer, onChangelog: () -> Unit, onUpdate: () -> Un
                     stringResource(R.string.tropa_update_changelog),
                     color = TropaColors.Brand,
                     fontWeight = FontWeight.SemiBold,
+                    textDecoration = TextDecoration.Underline,
                     modifier = Modifier.clickable(onClick = onChangelog).padding(vertical = 4.dp),
                 )
             }

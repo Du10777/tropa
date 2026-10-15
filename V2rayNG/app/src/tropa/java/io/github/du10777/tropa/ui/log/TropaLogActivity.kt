@@ -85,12 +85,17 @@ object LogActions {
         ProblemReports.shareText(context.applicationContext, WatchStateStore.read())
     }
 
-    /** Shares the log as a text file (long logs do not fit into an intent as plain text). */
+    /**
+     * Shares the log as a text file named after the moment it was taken (long logs do not fit into
+     * an intent as plain text); the files of earlier shares are removed.
+     */
     fun share(context: Context) {
         scope.launch {
             val app = context.applicationContext
             val uri = withContext(Dispatchers.IO) {
-                val file = File(app.cacheDir, "tropa-connection-log.txt").apply { writeText(logText(app)) }
+                val dir = File(app.cacheDir, "shared").apply { mkdirs() }
+                dir.listFiles()?.forEach { it.delete() }
+                val file = File(dir, shareFileName(System.currentTimeMillis())).apply { writeText(logText(app)) }
                 FileProvider.getUriForFile(app, "${app.packageName}.cache", file)
             }
             val send = Intent(Intent.ACTION_SEND)
@@ -101,6 +106,10 @@ object LogActions {
             runCatching { context.startActivity(Intent.createChooser(send, context.getString(R.string.tropa_log_share))) }
         }
     }
+
+    /** tropa-connection-log_2026.10.15_13-45-12.txt (local time). */
+    internal fun shareFileName(at: Long): String =
+        "tropa-connection-log_" + SimpleDateFormat("yyyy.MM.dd_HH-mm-ss", Locale.ROOT).format(Date(at)) + ".txt"
 
     fun copy(context: Context) {
         scope.launch {
