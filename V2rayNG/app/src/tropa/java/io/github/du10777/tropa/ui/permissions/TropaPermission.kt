@@ -32,6 +32,9 @@ enum class TropaPermission(
     CAMERA("camera", R.string.tropa_perm_camera, R.string.tropa_perm_camera_reason),
     PHONE_STATE("phone_state", R.string.tropa_perm_phone, R.string.tropa_perm_phone_reason),
 
+    /** Installing Tropa's own updates (Android 8+ asks once per app); asked at the first update. */
+    INSTALL("install", R.string.tropa_perm_install, R.string.tropa_perm_install_reason),
+
     /** System "always-on VPN" with "block connections without VPN"; listed when the kill switch is on. */
     LOCKDOWN("lockdown", R.string.tropa_perm_lockdown, R.string.tropa_kill_switch_explain);
 
@@ -40,6 +43,7 @@ enum class TropaPermission(
         NOTIFICATIONS -> Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
         // Since Android 13 the network type comes with READ_BASIC_PHONE_STATE, granted at install.
         PHONE_STATE -> Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+        INSTALL -> Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
         LOCKDOWN -> CheckSettings.killSwitch
         else -> true
     }
@@ -50,6 +54,7 @@ enum class TropaPermission(
         BATTERY -> context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
         CAMERA -> granted(context, Manifest.permission.CAMERA)
         PHONE_STATE -> !isApplicable() || granted(context, Manifest.permission.READ_PHONE_STATE)
+        INSTALL -> Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
         // Known only while the VPN runs (Android 10+); reported by the watchdog.
         LOCKDOWN -> WatchStateStore.read()?.lockdown == true
     }
@@ -105,6 +110,10 @@ class TropaPermissionRequester(private val activity: ComponentActivity) {
         when (permission) {
             TropaPermission.VPN -> VpnService.prepare(activity)?.let(intentLauncher::launch) ?: finish()
             TropaPermission.LOCKDOWN -> launchIntent(Intent(Settings.ACTION_VPN_SETTINGS), fallback = Intent(Settings.ACTION_SETTINGS))
+            TropaPermission.INSTALL -> launchIntent(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")),
+                fallback = appDetailsIntent(),
+            )
             TropaPermission.BATTERY -> launchIntent(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${activity.packageName}")),
                 fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),

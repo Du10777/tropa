@@ -26,6 +26,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.HelperBaseComponentActivity
 import com.v2ray.ang.ui.main.MainActivity
+import io.github.du10777.tropa.data.AppUpdates
 import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.ProfileDetails
 import io.github.du10777.tropa.data.SubscriptionRefresher
@@ -163,6 +164,15 @@ class TropaMainActivity : HelperBaseComponentActivity() {
                     onOpenGeo = { ref -> startActivity(TropaGeoActivity.intent(this, ref.file, ref.code)) },
                 ),
             )
+            state.update?.let { offer ->
+                UpdateDialog(
+                    offer = offer,
+                    onChangelog = { openUrl(offer.release.page) },
+                    onUpdate = ::startUpdate,
+                    onCancel = viewModel::cancelUpdate,
+                    onLater = viewModel::postponeUpdate,
+                )
+            }
             confirm?.let { pending ->
                 ConfirmDialog(
                     text = pending.text,
@@ -202,7 +212,36 @@ class TropaMainActivity : HelperBaseComponentActivity() {
                 MmkvManager.setSelectServer(guid)
                 LauncherManager.restartService(this)
             }
+
+            is MainEvent.Install -> {
+                // The installer stops the running app with its VPN; the new version turns it back on.
+                AppUpdates.resumeVpnFor = if (viewModel.state.value.core == CoreState.Running) event.version else ""
+                runCatching { startActivity(AppUpdates.installIntent(this, event.file)) }
+                    .onFailure { toast(R.string.tropa_update_failed) }
+            }
         }
+    }
+
+    /** "Update": the install permission first (asked once, explained), then the download. */
+    private fun startUpdate() {
+        val release = viewModel.state.value.update?.release ?: return
+        // No build for this phone in the release: its page lists all of them.
+        if (release.apk == null) return openUrl(release.page)
+        val permission = TropaPermission.INSTALL
+        if (!permission.isApplicable() || permission.isGranted(this)) return viewModel.downloadUpdate()
+        explanation = PendingExplanation(
+            permission = permission,
+            onYes = {
+                permissions.request(permission) {
+                    if (permission.isGranted(this)) viewModel.downloadUpdate() else toast(R.string.tropa_update_no_permission, long = true)
+                }
+            },
+            onNo = { toast(R.string.tropa_update_no_permission, long = true) },
+        )
+    }
+
+    private fun openUrl(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
     }
 
     /** Shows the explanation; on "Yes" asks Android, then continues with [next] either way. */

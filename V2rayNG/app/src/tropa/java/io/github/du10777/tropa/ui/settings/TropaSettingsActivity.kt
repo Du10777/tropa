@@ -43,13 +43,19 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.enums.Language
 import com.v2ray.ang.handler.AppLocaleManager
+import com.v2ray.ang.extension.toast
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.main.MainActivity
 import com.v2ray.ang.util.Utils
+import io.github.du10777.tropa.data.AppUpdates
 import io.github.du10777.tropa.data.BypassApps
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
@@ -58,6 +64,7 @@ import io.github.du10777.tropa.ui.log.TropaLogActivity
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.WatchStateStore
 import io.github.du10777.tropa.ui.common.TropaTopBar
+import io.github.du10777.tropa.ui.main.TropaMainActivity
 import io.github.du10777.tropa.ui.permissions.TropaPermissionsActivity
 import io.github.du10777.tropa.ui.theme.TropaColors
 import io.github.du10777.tropa.ui.theme.TropaTheme
@@ -70,12 +77,39 @@ class TropaSettingsActivity : BaseComponentActivity() {
     private var logLevel by mutableStateOf(ConnectionLog.level)
     private var proxy by mutableStateOf(LocalProxy.userProxy)
     private var bypassApps by mutableStateOf(0)
+    private var updatesOn by mutableStateOf(AppUpdates.enabled)
+    private var checkingUpdate by mutableStateOf(false)
+    private var availableVersion by mutableStateOf(AppUpdates.available()?.version)
 
     override fun onResume() {
         super.onResume()
         logLevel = ConnectionLog.level
         proxy = LocalProxy.userProxy
         bypassApps = if (BypassApps.reversed) 0 else BypassApps.packages().size
+        availableVersion = AppUpdates.available()?.version
+    }
+
+    /** Tapping the row checks right away; a newer version opens the main screen, which offers it. */
+    private fun checkUpdateNow() {
+        if (checkingUpdate) return
+        checkingUpdate = true
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { AppUpdates.check() }
+            checkingUpdate = false
+            val release = result.getOrNull()
+            availableVersion = release?.version
+            when {
+                result.isFailure -> toast(R.string.tropa_update_check_failed)
+                release == null -> toast(R.string.tropa_update_latest)
+                else -> {
+                    AppUpdates.clearPostponed()
+                    startActivity(
+                        Intent(this@TropaSettingsActivity, TropaMainActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    )
+                }
+            }
+        }
     }
 
     @Composable
@@ -131,6 +165,19 @@ class TropaSettingsActivity : BaseComponentActivity() {
                                 if (enabled) explainKillSwitch = true
                             },
                             onClick = { if (killSwitch) explainKillSwitch = true },
+                        )
+                        UpdatesRow(
+                            enabled = updatesOn,
+                            status = when {
+                                checkingUpdate -> stringResource(R.string.tropa_settings_updates_checking)
+                                availableVersion != null -> stringResource(R.string.tropa_settings_updates_available, BuildConfig.VERSION_NAME, availableVersion.orEmpty())
+                                else -> stringResource(R.string.tropa_settings_updates_status, BuildConfig.VERSION_NAME)
+                            },
+                            onChange = { enabled ->
+                                updatesOn = enabled
+                                AppUpdates.enabled = enabled
+                            },
+                            onClick = ::checkUpdateNow,
                         )
                         AdvancedModeRow(advancedMode) { enabled ->
                             advancedMode = enabled
@@ -229,6 +276,35 @@ private fun SettingsRow(@DrawableRes icon: Int, title: String, value: String?, o
                 if (value != null) Text(value, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(painterResource(R.drawable.tropa_ic_chevron_right), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun UpdatesRow(enabled: Boolean, status: String, onChange: (Boolean) -> Unit, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(painterResource(R.drawable.ic_cloud_download_24dp), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.tropa_settings_updates), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(status, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onChange,
+                colors = SwitchDefaults.colors(checkedTrackColor = TropaColors.Brand, checkedThumbColor = Color.White),
+            )
         }
     }
 }

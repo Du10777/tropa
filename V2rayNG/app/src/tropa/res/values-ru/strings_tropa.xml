@@ -260,4 +260,25 @@
         <item quantity="many">%d приложений</item>
         <item quantity="other">%d приложения</item>
     </plurals>
+    <!-- 0.10: обновления -->
+    <string name="tropa_perm_install">Установка обновлений</string>
+    <string name="tropa_perm_install_reason">Чтобы Тропа сама ставила свои новые версии. Android откроет настройку «Установка неизвестных приложений» — разрешите там Тропе.</string>
+    <string name="tropa_update_title">Доступна версия %1$s</string>
+    <string name="tropa_update_text">Тропа скачает её и запустит установку. Подключения и настройки сохранятся.</string>
+    <string name="tropa_update_downloading">Скачивание: %1$s из %2$s</string>
+    <string name="tropa_update_failed">Не удалось скачать обновление. Проверьте интернет и попробуйте ещё раз.</string>
+    <string name="tropa_update_install">Обновить</string>
+    <string name="tropa_update_retry">Повторить</string>
+    <string name="tropa_update_changelog">Список изменений</string>
+    <string name="tropa_update_later">Не сейчас</string>
+    <string name="tropa_update_no_permission">Без разрешения на установку Тропа не может обновиться сама. Новую версию можно скачать со страницы выпуска.</string>
+    <string name="tropa_update_notify_title">Доступна новая версия Тропы</string>
+    <string name="tropa_update_notify_text">Версия %1$s. Нажмите, чтобы обновить.</string>
+    <string name="tropa_update_channel">Обновления</string>
+    <string name="tropa_settings_updates">Проверять обновления</string>
+    <string name="tropa_settings_updates_status">Установлена версия %1$s</string>
+    <string name="tropa_settings_updates_available">Установлена %1$s, доступна %2$s</string>
+    <string name="tropa_settings_updates_checking">Проверяю…</string>
+    <string name="tropa_update_latest">У вас последняя версия</string>
+    <string name="tropa_update_check_failed">Не удалось проверить обновления</string>
 </resources>

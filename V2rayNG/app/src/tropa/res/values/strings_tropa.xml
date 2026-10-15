@@ -257,4 +257,25 @@
         <item quantity="one">%d app</item>
         <item quantity="other">%d apps</item>
     </plurals>
+    <!-- 0.10: updates -->
+    <string name="tropa_perm_install">Install updates</string>
+    <string name="tropa_perm_install_reason">So that Tropa installs its new versions itself. Android opens the "Install unknown apps" setting: allow Tropa there.</string>
+    <string name="tropa_update_title">Version %1$s is available</string>
+    <string name="tropa_update_text">Tropa downloads it and starts the installation. Connections and settings stay.</string>
+    <string name="tropa_update_downloading">Downloading: %1$s of %2$s</string>
+    <string name="tropa_update_failed">Could not download the update. Check the internet connection and try again.</string>
+    <string name="tropa_update_install">Update</string>
+    <string name="tropa_update_retry">Try again</string>
+    <string name="tropa_update_changelog">What\'s new</string>
+    <string name="tropa_update_later">Not now</string>
+    <string name="tropa_update_no_permission">Without the permission to install, Tropa cannot update itself. The new version can be downloaded from the release page.</string>
+    <string name="tropa_update_notify_title">A new version of Tropa is available</string>
+    <string name="tropa_update_notify_text">Version %1$s. Tap to update.</string>
+    <string name="tropa_update_channel">Updates</string>
+    <string name="tropa_settings_updates">Check for updates</string>
+    <string name="tropa_settings_updates_status">Installed: %1$s</string>
+    <string name="tropa_settings_updates_available">Installed: %1$s, available: %2$s</string>
+    <string name="tropa_settings_updates_checking">Checking…</string>
+    <string name="tropa_update_latest">You have the latest version</string>
+    <string name="tropa_update_check_failed">Could not check for updates</string>
 </resources>

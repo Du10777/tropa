@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.SettingsManager
 import io.github.du10777.tropa.data.AddResult
+import io.github.du10777.tropa.data.AppUpdates
 import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.LinkCandidate
@@ -17,7 +18,9 @@ import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.CoreState
 import io.github.du10777.tropa.service.ServiceStateMonitor
 import io.github.du10777.tropa.service.WatchState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -29,6 +32,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.security.MessageDigest
 
 /** Clipboard text that looks like a connection and was not handled yet. */
@@ -47,13 +51,29 @@ data class MainUiState(
     val watch: WatchState? = null,
     /** The server's message (Announce header) of the active connection, unless the user closed it. */
     val announce: String? = null,
+    /** A newer Tropa version to offer, with its download. */
+    val update: UpdateOffer? = null,
 )
+
+/** A newer Tropa version offered on the main screen, and how its download goes. */
+data class UpdateOffer(
+    val release: AppUpdates.Release,
+    /** Bytes downloaded so far; null while no download runs. */
+    val progress: Long? = null,
+    val total: Long = 0L,
+    val failed: Boolean = false,
+) {
+    val downloading: Boolean get() = progress != null
+}
 
 sealed interface MainEvent {
     data class Message(@StringRes val text: Int, val arg: String? = null) : MainEvent
 
     /** A connection was added while the tunnel was running: switch to it. */
     data class SwitchTo(val connectionId: String) : MainEvent
+
+    /** The update is downloaded and checked: hand it to the system installer. */
+    data class Install(val file: File, val version: String) : MainEvent
 }
 
 class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
@@ -63,6 +83,9 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _events = Channel<MainEvent>(Channel.BUFFERED)
     val events: Flow<MainEvent> = _events.receiveAsFlow()
+
+    private var updateCheck: Job? = null
+    private var updateDownload: Job? = null
 
     init {
         reload()
@@ -110,6 +133,57 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
     fun onResumed() {
         reload()
         monitor.requestState()
+        lookForUpdate()
+    }
+
+    /** Once a day GitHub is asked for a newer version; one found earlier (also by the watchdog) is offered. */
+    private fun lookForUpdate() {
+        if (updateCheck?.isActive == true || updateDownload?.isActive == true) return
+        updateCheck = viewModelScope.launch(Dispatchers.IO) {
+            if (AppUpdates.isDue()) AppUpdates.check()
+            val release = AppUpdates.available()?.takeIf { AppUpdates.enabled && AppUpdates.shouldOffer(it) }
+            _state.update { state ->
+                when {
+                    state.update?.downloading == true -> state
+                    release == null -> state.copy(update = null)
+                    state.update?.release == release -> state
+                    else -> state.copy(update = UpdateOffer(release))
+                }
+            }
+        }
+    }
+
+    fun postponeUpdate() {
+        state.value.update?.release?.let(AppUpdates::postpone)
+        _state.update { it.copy(update = null) }
+    }
+
+    fun downloadUpdate() {
+        val offer = state.value.update ?: return
+        val apk = offer.release.apk ?: return
+        if (updateDownload?.isActive == true) return
+        _state.update { it.copy(update = offer.copy(progress = 0L, total = apk.size, failed = false)) }
+        updateDownload = viewModelScope.launch(Dispatchers.IO) {
+            val file = try {
+                AppUpdates.download(getApplication(), apk) { done, total ->
+                    _state.update { state -> state.update?.let { state.copy(update = it.copy(progress = done, total = total)) } ?: state }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            _state.update { state -> state.copy(update = state.update?.copy(progress = null, failed = file == null)) }
+            if (file != null) {
+                _state.update { it.copy(update = null) }
+                _events.send(MainEvent.Install(file, offer.release.version))
+            }
+        }
+    }
+
+    fun cancelUpdate() {
+        updateDownload?.cancel()
+        _state.update { state -> state.copy(update = state.update?.copy(progress = null)) }
     }
 
     /** The switch was turned on; if the service never reports back, fall back to "disconnected". */

@@ -26,6 +26,7 @@ object LocalProxy {
     private const val PORT = "tropa_proxy_port"
     private const val USER = "tropa_proxy_user"
     private const val PASS = "tropa_proxy_pass"
+    private const val INTERNAL_PORT = "tropa_internal_port"
     const val USER_TAG = "tropa-local"
     private val LOCAL_PROTOCOLS = setOf("socks", "http", "mixed")
     private const val ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -63,6 +64,16 @@ object LocalProxy {
         SettingsManager.refreshRuntimeSocksPort()
         MmkvManager.encodeSettings(AppConfig.PREF_SOCKS_USERNAME, token(12))
         MmkvManager.encodeSettings(AppConfig.PREF_SOCKS_PASSWORD, token(24))
+        // The runtime port lives in this process only; the UI reads it from here (updates through the tunnel).
+        MmkvManager.encodeSettings(INTERNAL_PORT, SettingsManager.getSocksPort())
+    }
+
+    /** The internal inbound of the running VPN, from any process (stale while the VPN is off). */
+    fun internal(): Internal? {
+        val port = MmkvManager.decodeSettingsInt(INTERNAL_PORT, 0).takeIf { it in 1..65535 } ?: return null
+        val user = SettingsManager.getSocksUsername() ?: return null
+        val pass = SettingsManager.getSocksPassword() ?: return null
+        return Internal(port, user, pass)
     }
 
     fun token(length: Int): String = buildString { repeat(length) { append(ALPHABET[random.nextInt(ALPHABET.length)]) } }

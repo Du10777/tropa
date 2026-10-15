@@ -20,6 +20,7 @@ import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.util.LogUtil
+import io.github.du10777.tropa.data.AppUpdates
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.Connections
@@ -345,7 +346,10 @@ object TropaWatchdog {
                 if (!CheckSettings.enabled) {
                     if (connectedAt == 0L) {
                         connectedAt = System.currentTimeMillis()
-                        scope.launch { refreshDueSubscriptions() }
+                        scope.launch {
+                            refreshDueSubscriptions()
+                            checkAppUpdate()
+                        }
                     }
                     if (subscriptionChanged.getAndSet(false)) applyUnchecked()
                     publish(WatchPhase.CHECKS_OFF)
@@ -419,8 +423,18 @@ object TropaWatchdog {
         private suspend fun refreshSubscriptions() {
             while (currentCoroutineContext().isActive) {
                 delay(SUBSCRIPTION_CHECK_MS)
-                if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF) refreshDueSubscriptions()
+                if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF) {
+                    refreshDueSubscriptions()
+                    checkAppUpdate()
+                }
             }
+        }
+
+        /** Once a day while the VPN is on: a newer Tropa version is announced with a notification (once per version). */
+        private fun checkAppUpdate() {
+            if (!AppUpdates.isDue()) return
+            val release = AppUpdates.check().getOrNull() ?: return
+            if (AppUpdates.takeNotification(release)) TropaNotifier.notifyUpdate(context, release.version)
         }
 
         /** Downloads the due subscriptions; new servers of the active one go into the running core. */
@@ -894,7 +908,10 @@ object TropaWatchdog {
         private fun onConnected() {
             if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
             subscriptionRetried = false
-            scope.launch { refreshDueSubscriptions() }
+            scope.launch {
+                refreshDueSubscriptions()
+                checkAppUpdate()
+            }
             if (reportSaved || ProblemReports.hasPending(context)) {
                 reportSaved = false
                 scope.launch { ProblemReports.uploadPending(context) }
