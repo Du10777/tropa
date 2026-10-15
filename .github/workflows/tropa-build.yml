@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Publish a GitHub release with this tag (for example v0.1.0); leave empty to only build'
+        description: 'Publish a GitHub release with this tag (for example v0.1.0) if it does not exist; pushes publish the version of tropa.gradle'
         required: false
         type: string
 
@@ -168,15 +168,21 @@ jobs:
           path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/playstore/release/*universal*.apk
 
       - name: Publish release
-        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        if: github.event_name == 'push' || inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag }}
         run: |
-          notes="V2rayNG/app/src/tropa/changelog/${TAG}.md"
-          apks=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*{arm64-v8a,armeabi-v7a,universal}*.apk)
-          if [ -f "$notes" ]; then
-            gh release create "$TAG" $apks --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Тропа ${TAG#v}" --notes-file "$notes"
-          else
-            gh release create "$TAG" $apks --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Тропа ${TAG#v}" --generate-notes
+          # One release per version: the version of tropa.gradle is published by the first build that
+          # has it, later builds of the same version (upstream merges, CI fixes) leave it alone.
+          # The app offers updates from these releases, the notes are what people read there.
+          version=$(sed -n "s/^def tropaVersionName = '\([^']*\)'.*/\1/p" V2rayNG/app/tropa.gradle | tr -d '\r')
+          tag="${TAG:-v$version}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $tag exists, nothing to publish"
+            exit 0
           fi
+          notes="V2rayNG/app/src/tropa/changelog/${tag}.md"
+          if [ ! -f "$notes" ]; then echo "::error::Release notes $notes are missing"; exit 1; fi
+          apks=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*.apk)
+          gh release create "$tag" $apks --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Тропа ${tag#v}" --notes-file "$notes"
