@@ -98,7 +98,7 @@ jobs:
 
       - name: Setup Go
         if: steps.lib-cache.outputs.cache-hit != 'true'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'AndroidLibXrayLite/go.mod'
           cache-dependency-path: 'AndroidLibXrayLite/go.sum'
