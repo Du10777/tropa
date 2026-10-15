@@ -1,0 +1,123 @@
+name: Upstream sync
+
+# Every night: mirror 2dust/v2rayNG master into our master branch, merge it into tropa, build the
+# result with the regular build workflow and push it to tropa if the build is green. A conflict or a
+# broken build opens one issue (later failures comment on it), which GitHub mails to the owner; the
+# next sync that goes through closes it. Releases still come only with version bumps (tropa.gradle).
+
+on:
+  schedule:
+    - cron: '17 1 * * *' # 04:17 Moscow time
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream branch or tag to merge'
+        required: false
+        default: 'master'
+        type: string
+      force_build:
+        description: 'Build and push even if there is nothing new to merge'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: tropa-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: 'https://github.com/2dust/v2rayNG.git'
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.merge.outputs.build }}
+    steps:
+      # Upstream commits may change workflow files, which GITHUB_TOKEN may not push: a token with
+      # the Workflows permission does (secret TROPA_SYNC_TOKEN, see TROPA.md).
+      - name: Checkout tropa
+        uses: actions/checkout@v7
+        with:
+          ref: tropa
+          fetch-depth: '0'
+          token: ${{ secrets.TROPA_SYNC_TOKEN }}
+
+      - name: Mirror and merge upstream
+        id: merge
+        env:
+          REF: ${{ inputs.upstream_ref || 'master' }}
+          FORCE: ${{ inputs.force_build || false }}
+        run: |
+          git config user.name 'Tropa sync'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags "$UPSTREAM" "$REF"
+          upstream=$(git rev-parse FETCH_HEAD)
+          if [ "$REF" = master ]; then git push origin "$upstream:refs/heads/master"; fi
+          if git merge-base --is-ancestor "$upstream" HEAD; then
+            echo "Nothing new from upstream (${upstream:0:8})" | tee -a "$GITHUB_STEP_SUMMARY"
+            if [ "$FORCE" != true ]; then echo "build=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # [skip ci]: the push to tropa below does not build again, this run already did.
+          elif ! git merge --no-edit -m "Merge upstream v2rayNG ${upstream:0:8} [skip ci]" "$upstream"; then
+            echo "Merge conflicts with upstream ${upstream:0:8}:" | tee -a "$GITHUB_STEP_SUMMARY"
+            git diff --name-only --diff-filter=U | sed 's/^/- /' | tee -a "$GITHUB_STEP_SUMMARY"
+            git merge --abort
+            exit 1
+          fi
+          git push --force origin HEAD:refs/heads/upstream-sync
+          echo "build=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: merge
+    if: needs.merge.outputs.build == 'true'
+    uses: ./.github/workflows/tropa-build.yml
+    with:
+      ref: upstream-sync
+    secrets: inherit
+
+  push:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the built merge
+        uses: actions/checkout@v7
+        with:
+          ref: upstream-sync
+          fetch-depth: '0'
+          token: ${{ secrets.TROPA_SYNC_TOKEN }}
+
+      # A plain push: if tropa moved meanwhile it is not a fast-forward and fails (next night retries).
+      - name: Fast-forward tropa
+        run: |
+          git push origin HEAD:refs/heads/tropa
+          git push origin --delete upstream-sync
+
+  report:
+    needs: [merge, build, push]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open, update or close the sync issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: 'merge ${{ needs.merge.result }}, build ${{ needs.build.result }}, push ${{ needs.push.result }}'
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          gh label create upstream-sync --color D93F0B --description 'Nightly upstream merge failed' 2>/dev/null || true
+          open=$(gh issue list --label upstream-sync --state open --json number --jq '.[0].number // empty')
+          case "$RESULT" in
+            *failure*|*cancelled*)
+              body="The upstream sync failed: $RESULT. Run: $RUN (@$OWNER)"
+              if [ -n "$open" ]; then gh issue comment "$open" --body "$body"
+              else gh issue create --title "Upstream sync failed" --label upstream-sync --body "$body"; fi
+              ;;
+            *)
+              if [ -n "$open" ]; then gh issue close "$open" --comment "The upstream sync went through: $RUN"; fi
+              ;;
+          esac

@@ -26,7 +26,10 @@ upstream changes can be merged with a plain `git merge` and conflicts stay rare 
     to Tropa;
   - `test/java/` — JVM unit tests (run with `testPlaystoreDebugUnitTest`).
 - `.github/workflows/tropa-build.yml` — CI: builds `libv2ray.aar` from the AndroidLibXrayLite commit
-  pinned by the submodule plus our `tropa_*.go` files, builds hev, signs and uploads the APKs.
+  pinned by the submodule plus our `tropa_*.go` files, builds hev, signs and uploads the APKs; a push
+  of a new version (tropa.gradle) publishes the GitHub release `v<version>` with the notes of
+  `V2rayNG/app/src/tropa/changelog/v<version>.md`, which the in-app updater offers.
+- `.github/workflows/tropa-sync.yml` — the nightly upstream sync, see below.
 - `.github/README.md` — the repository front page (GitHub prefers it over the upstream `README.md`).
 - AndroidLibXrayLite fork: only new `tropa_*.go` files. `tropa_api.go` adds `TropaProbe` (fetch a URL
   through the running core, optionally forced through one outbound), `TropaOverrideBalancer` and
@@ -59,6 +62,32 @@ from `AndroidLibXrayLite/go.mod`) with gomobile.
 Upstream workflows (`build.yml`, `fastlane.yml` here; `main.yml`, `tidy.yml` in the library fork) are
 disabled in the GitHub Actions settings of the forks, so they never run on mirror pushes.
 
+## Nightly upstream sync
+
+`tropa-sync.yml` runs every night at 01:17 UTC (04:17 Moscow time) and by hand (Actions → Upstream
+sync → Run workflow, optionally with another upstream branch or tag, or "build even if nothing is
+new"):
+
+1. mirrors `2dust/v2rayNG@master` into our `master`;
+2. merges it into `tropa` on a temporary branch `upstream-sync` (commit message with `[skip ci]`);
+3. builds that branch with `tropa-build.yml` (called as a reusable workflow, no release);
+4. if the build is green, fast-forwards `tropa` to it and deletes `upstream-sync`.
+
+A merge conflict, a broken build or a failed push opens an issue labelled `upstream-sync` (later
+failures comment on the open one, and GitHub mails the owner); the next sync that goes through
+closes it. To fix a conflict: merge upstream into `tropa` locally, resolve, build, push; the next
+night finds nothing new and closes the issue. Upstream changes reach people with the next Tropa
+version, the sync itself never publishes a release.
+
+GitHub turns off scheduled workflows of public repositories after 60 days without activity; the
+sync's own merges count, so this only matters if upstream stops changing for two months.
+
 ## CI secrets
 
-`TROPA_KEYSTORE_BASE64`, `TROPA_KEYSTORE_PASSWORD`, `TROPA_KEY_ALIAS`, `TROPA_KEY_PASSWORD`.
+`TROPA_KEYSTORE_BASE64`, `TROPA_KEYSTORE_PASSWORD`, `TROPA_KEY_ALIAS`, `TROPA_KEY_PASSWORD` (signing).
+
+`TROPA_SYNC_TOKEN`: a fine-grained token with Contents and Workflows write access to this repository,
+used by the upstream sync, because upstream commits can change workflow files and `GITHUB_TOKEN` may
+not push those. When it expires, the sync fails and opens its issue: create a new token and put it
+into the secret (`tools/gh.py sync-token Du10777/tropa` uploads the token of the git credential
+manager).

@@ -10,12 +10,19 @@ on:
         description: 'Publish a GitHub release with this tag (for example v0.1.0) if it does not exist; pushes publish the version of tropa.gradle'
         required: false
         type: string
+  # The nightly upstream sync (tropa-sync.yml) builds its merge before pushing it; no release then.
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Branch to build'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: tropa-build-${{ github.ref }}
+  group: tropa-build-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -33,6 +40,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref || github.ref }}
           submodules: 'recursive'
           fetch-depth: '0'
 
