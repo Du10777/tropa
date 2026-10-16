@@ -116,9 +116,7 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
  */
 object TropaWatchdog {
     private const val TAG = "TropaWatchdog"
-    private const val LATENCY_TIMEOUT_MS = 6_000L
     private const val LATENCY_MAX_BYTES = 32L * 1024
-    private const val THROUGHPUT_TIMEOUT_MS = 15_000L
     private const val THROUGHPUT_MAX_BYTES = 256L * 1024
     private const val RETRY_AFTER_FAILURE_MS = 5_000L
     private const val NO_INTERNET_RECHECK_MS = 30_000L
@@ -358,6 +356,11 @@ object TropaWatchdog {
         private var pauseReason: String? = null
         private var roamingMcc: String? = null
         private var loggedPause: String? = null
+
+        /** Check parameters: the user's, then the server's of the connection, then the defaults (read every round). */
+        @Volatile
+        private var cfg = CheckSettings.DEFAULTS
+
         /** Last outcome and last written check of each server, to keep steady periods short in the log. */
         private val lastOutcome = ConcurrentHashMap<String, Boolean>()
         private val lastWrittenAt = ConcurrentHashMap<String, Long>()
@@ -381,6 +384,7 @@ object TropaWatchdog {
             loadPlan()
             var attempt = 0
             while (currentCoroutineContext().isActive) {
+                refreshSettings()
                 val cell = cellular()
                 if (guardRoaming(cell)) {
                     connectedAt = 0L
@@ -435,6 +439,13 @@ object TropaWatchdog {
                 reconnect(attempt, rotate = !updated)
                 loadPlan()
             }
+        }
+
+        /** Takes the check parameters again: the user may change them, a subscription update may bring the server's. */
+        private fun refreshSettings() {
+            cfg = runCatching { CheckSettings.current() }.onFailure { LogUtil.e(TAG, "cannot read the check settings", it) }
+                .getOrDefault(cfg)
+            selector.tune(cfg)
         }
 
         /** Reads the servers of the configuration the core runs (the saved one, the core starts from it). */
@@ -761,13 +772,14 @@ object TropaWatchdog {
             var nextDelay = intervalMs()
             while (currentCoroutineContext().isActive && CheckSettings.enabled) {
                 waitForWake(nextDelay)
+                refreshSettings()
                 val cell = cellular()
                 if (!CheckSettings.enabled || Roaming.mustBlock(cell) || pauseReasonOf(cell) != null) return true
                 ensureOverride()
                 if (subscriptionChanged.getAndSet(false)) applySubscription()
                 val tag = activeTag ?: return false
                 val othersDue = plan.isBalanced && screenOn &&
-                    System.currentTimeMillis() - lastOthersAt >= CheckSettings.othersIntervalSec * 1000L
+                    System.currentTimeMillis() - lastOthersAt >= cfg.othersIntervalSec * 1000L
                 // All servers are checked at the same time, the active one included.
                 val tags = if (othersDue) plan.nodes.map { it.tag } else listOf(tag)
                 var results = probeAll(tags)
@@ -783,7 +795,7 @@ object TropaWatchdog {
                     checkedAt = System.currentTimeMillis()
                 }
                 val now = System.currentTimeMillis()
-                if (screenOn && result.ok && now - lastThroughputAt >= CheckSettings.throughputIntervalSec * 1000L) {
+                if (screenOn && result.ok && now - lastThroughputAt >= cfg.downloadIntervalSec * 1000L) {
                     if (!throughputOk(tag)) selector.record(tag, ok = false, latencyMs = null)
                     lastThroughputAt = now
                 }
@@ -806,7 +818,7 @@ object TropaWatchdog {
         }
 
         private fun intervalMs(): Long =
-            (if (screenOn) CheckSettings.activeIntervalSec else CheckSettings.screenOffIntervalSec) * 1000L
+            (if (screenOn) cfg.activeIntervalSec else cfg.screenOffIntervalSec) * 1000L
 
         private fun switchTo(tag: String, reason: String) {
             LogUtil.i(TAG, "switching new connections to $tag ($reason)")
@@ -869,14 +881,15 @@ object TropaWatchdog {
          * The log gets one line per server: the address that answered, or the errors of all of them.
          */
         private suspend fun probeLatency(tag: String): ProbeResult {
-            val urls = CheckSettings.latencyUrls
+            val urls = cfg.latencyUrls
+            val timeoutMs = cfg.latencyTimeoutSec * 1000L
             if (urls.isEmpty()) return ProbeResult(error = "no addresses")
             // At the debug level every address is written by itself, the late ones too.
             val perAddress = ConnectionLog.level == LogLevel.DEBUG
             val answers = Channel<Pair<String, ProbeResult>>(Channel.UNLIMITED)
             urls.forEach { url ->
                 scope.launch {
-                    val result = probe(tag, url, LATENCY_TIMEOUT_MS, LATENCY_MAX_BYTES)
+                    val result = probe(tag, url, timeoutMs, LATENCY_MAX_BYTES)
                     if (perAddress) record(event(tag, "latency", url, result.ok, result, detail = httpStatus(result)))
                     answers.trySend(url to result)
                 }
@@ -924,15 +937,17 @@ object TropaWatchdog {
             record(event)
         }
 
-        /** At least 64 KB must come through: catches channels that stall after ~16 KB. */
-        private fun throughputOk(tag: String): Boolean =
-            CheckSettings.throughputUrls.any { url ->
-                val result = probe(tag, url, THROUGHPUT_TIMEOUT_MS, THROUGHPUT_MAX_BYTES)
-                val ok = result.ok && result.bytes >= CheckSettings.THROUGHPUT_MIN_BYTES
+        /** At least 64 KB (or the server's downloadMinKb) must come through: catches channels that stall after ~16 KB. */
+        private fun throughputOk(tag: String): Boolean {
+            val values = cfg
+            return values.downloadUrls.any { url ->
+                val result = probe(tag, url, values.downloadTimeoutSec * 1000L, maxOf(THROUGHPUT_MAX_BYTES, values.downloadMinBytes))
+                val ok = result.ok && result.bytes >= values.downloadMinBytes
                 val detail = if (ConnectionLog.level == LogLevel.DEBUG) httpStatus(result) else null
                 recordResult(event(tag, "download", url, ok, result, error = result.error ?: if (!ok) "only ${result.bytes} bytes" else null, detail = detail))
                 ok
             }
+        }
 
         private fun probe(tag: String, url: String, timeoutMs: Long, maxBytes: Long): ProbeResult = try {
             val json = CoreServiceManager.coreController.tropaProbe(tag, url, timeoutMs, maxBytes)
@@ -968,7 +983,7 @@ object TropaWatchdog {
         private fun record(event: ProbeEvent) = ConnectionLog.append(context, event)
 
         /** Direct request outside the tunnel (the app itself is excluded from its VPN). */
-        private fun internetUp(): Boolean = CheckSettings.directUrls.any { url ->
+        private fun internetUp(): Boolean = cfg.directUrls.any { url ->
             val started = System.currentTimeMillis()
             var status = 0
             val error = runCatching { direct.newCall(Request.Builder().url(url).build()).execute().use { status = it.code }; null }

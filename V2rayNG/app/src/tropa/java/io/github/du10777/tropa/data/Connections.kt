@@ -1,5 +1,6 @@
 package io.github.du10777.tropa.data
 
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.SubscriptionItem
@@ -10,6 +11,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
+import io.github.du10777.tropa.service.ProbeEvent
 import java.net.URI
 
 /** One Tropa connection: an upstream subscription group with its server profiles. */
@@ -261,6 +263,30 @@ object Connections {
         TropaPrefs.setReportUrl(id, headers["tropa-report-url"])
         TropaPrefs.setAnnounce(id, SubscriptionInfo.decodeTitle(headers["announce"])?.take(MAX_ANNOUNCE_CHARS))
         TropaPrefs.setLinks(id, headers["support-url"], headers["profile-web-page-url"])
+        saveServerChecks(id, headers["tropa-checks"])
+    }
+
+    /**
+     * Check parameters from the server (`Tropa-Checks`): the watchdog takes them on its next round.
+     * A change goes into the connection log, so a report shows what the phone runs with.
+     */
+    private fun saveServerChecks(id: String, header: String?) {
+        val checks = CheckParams.parse(header)
+        val stored = checks?.toJson()
+        if (stored == TropaPrefs.serverChecks(id)) return
+        TropaPrefs.setServerChecks(id, stored)
+        val detail = when {
+            checks != null -> checks.describe()
+            header.isNullOrBlank() -> "none from the server, defaults apply"
+            else -> "nothing usable in Tropa-Checks, defaults apply"
+        }
+        ConnectionLog.append(
+            AngApplication.application,
+            ProbeEvent(
+                System.currentTimeMillis(), "checks", MmkvManager.decodeSubscription(id)?.remarks.orEmpty(), null, "",
+                ok = checks != null || header.isNullOrBlank(), detail = detail,
+            ),
+        )
     }
 
     fun delete(id: String) {
@@ -269,6 +295,7 @@ object Connections {
         TropaPrefs.setSubscriptionInfo(id, null)
         TropaPrefs.setAnnounce(id, null)
         TropaPrefs.setLinks(id, null, null)
+        TropaPrefs.setServerChecks(id, null)
         if (TropaPrefs.activeConnectionId == id) {
             TropaPrefs.activeConnectionId = list().firstOrNull()?.id
         }

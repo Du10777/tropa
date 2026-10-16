@@ -9,12 +9,21 @@ package io.github.du10777.tropa.data
  *   active one and at least [betterMinMs] lower, [betterRounds] evaluations in a row.
  */
 class NodeSelector(
-    private val failThreshold: Int = CheckSettings.FAIL_THRESHOLD,
-    private val betterRatio: Double = CheckSettings.BETTER_RATIO,
-    private val betterMinMs: Long = CheckSettings.BETTER_MIN_MS,
-    private val betterRounds: Int = CheckSettings.BETTER_ROUNDS,
+    private var failThreshold: Int = CheckSettings.DEFAULTS.failThreshold,
+    private var betterRatio: Double = CheckSettings.DEFAULTS.betterRatio,
+    private var betterMinMs: Long = CheckSettings.DEFAULTS.betterMinMs.toLong(),
+    private var betterRounds: Int = CheckSettings.DEFAULTS.betterRounds,
     private val window: Int = 5,
 ) {
+    /** New thresholds (the check parameters may change while connected); what is known about the servers stays. */
+    @Synchronized
+    fun tune(values: CheckValues) {
+        failThreshold = values.failThreshold
+        betterRatio = values.betterRatio
+        betterMinMs = values.betterMinMs.toLong()
+        betterRounds = values.betterRounds
+    }
+
     sealed interface Decision {
         data object Keep : Decision
         data class SwitchTo(val tag: String, val reason: Reason) : Decision

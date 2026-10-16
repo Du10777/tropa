@@ -59,6 +59,7 @@ import io.github.du10777.tropa.data.AppUpdates
 import io.github.du10777.tropa.data.BypassApps
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
+import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.LocalProxy
 import io.github.du10777.tropa.data.Roaming
 import io.github.du10777.tropa.ui.log.TropaLogActivity
@@ -82,6 +83,7 @@ class TropaSettingsActivity : BaseComponentActivity() {
     private var checkingUpdate by mutableStateOf(false)
     private var availableVersion by mutableStateOf(AppUpdates.available()?.version)
     private var roamingStop by mutableStateOf(Roaming.stopTraffic)
+    private var checksSummary by mutableStateOf<Int?>(null)
 
     override fun onResume() {
         super.onResume()
@@ -90,6 +92,11 @@ class TropaSettingsActivity : BaseComponentActivity() {
         bypassApps = if (BypassApps.reversed) 0 else BypassApps.packages().size
         availableVersion = AppUpdates.available()?.version
         roamingStop = Roaming.stopTraffic
+        checksSummary = when {
+            !CheckSettings.enabled -> R.string.tropa_checks_summary_off
+            CheckSettings.server(Connections.activeId()) != null -> R.string.tropa_checks_summary_server
+            else -> null
+        }
     }
 
     /** Tapping the row checks right away; a newer version opens the main screen, which offers it. */
@@ -150,7 +157,7 @@ class TropaSettingsActivity : BaseComponentActivity() {
                         ) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaProxyActivity::class.java))
                         }
-                        SettingsRow(R.drawable.ic_check_update_24dp, stringResource(R.string.tropa_settings_checks), null) {
+                        SettingsRow(R.drawable.ic_check_update_24dp, stringResource(R.string.tropa_settings_checks), checksSummary?.let { stringResource(it) }) {
                             startActivity(Intent(this@TropaSettingsActivity, TropaChecksActivity::class.java))
                         }
                         SettingsRow(

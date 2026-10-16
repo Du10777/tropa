@@ -44,7 +44,8 @@ data class ProbeEvent(
      * Checks: latency | download | direct. Session: start | stop | connected | no_server |
      * no_internet | reload | switch (detail: why) | subscription (the active one changed, detail:
      * what was done with it) | roaming (target = network MCC, ok = traffic allowed) | paused
-     * (target = weak | roaming).
+     * (target = weak | roaming) | checks (server = connection, detail: the check parameters its
+     * server sent; ok = false when its Tropa-Checks header was unusable).
      * Details: network (target = wifi | cellular | ethernet | none | other, ok = validated by
      * Android) | servers | screen_on | screen_off | core (Xray message).
      */

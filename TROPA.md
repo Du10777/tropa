@@ -31,6 +31,8 @@ upstream changes can be merged with a plain `git merge` and conflicts stay rare 
   `V2rayNG/app/src/tropa/changelog/v<version>.md`, which the in-app updater offers.
 - `.github/workflows/tropa-sync.yml` — the nightly upstream sync, see below.
 - `.github/README.md` — the repository front page (GitHub prefers it over the upstream `README.md`).
+- `TROPA-SERVER.md` — for server owners (in Russian): the subscription headers Tropa sends and reads,
+  the `Tropa-Checks` check parameters, problem reports, one-time links.
 - AndroidLibXrayLite fork: only new `tropa_*.go` files. `tropa_api.go` adds `TropaProbe` (fetch a URL
   through the running core, optionally forced through one outbound), `TropaOverrideBalancer` and
   `TropaBalancerTarget` (steer a balancer in process, no gRPC port), `TropaAddOutbound` (add a server

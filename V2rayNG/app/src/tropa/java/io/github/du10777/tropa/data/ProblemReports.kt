@@ -68,10 +68,12 @@ object ProblemReports {
             "connection" to connection?.remarks,
             "subscriptionHost" to connection?.url?.let { runCatching { java.net.URI(it).host }.getOrNull() },
             "logLevel" to ConnectionLog.level.name,
+            // What the checks run with, and which part of it the server and the user set.
             "checks" to mapOf(
-                "latencyUrls" to CheckSettings.latencyUrls,
-                "throughputUrls" to CheckSettings.throughputUrls,
-                "directUrls" to CheckSettings.directUrls,
+                "enabled" to CheckSettings.enabled,
+                "values" to CheckSettings.current(connectionId),
+                "server" to CheckSettings.server(connectionId),
+                "user" to CheckSettings.user().takeIf { !it.isEmpty },
             ),
             "state" to state,
             "log" to log,

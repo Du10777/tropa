@@ -123,7 +123,7 @@
     <string name="tropa_checks_interval">How often to check</string>
     <string name="tropa_checks_interval_value">%1$d s</string>
     <string name="tropa_checks_latency_urls">Addresses for the latency check</string>
-    <string name="tropa_checks_throughput_urls">Addresses for the download check (64 KB or more)</string>
+    <string name="tropa_checks_throughput_urls">Addresses for the download check (%1$d KB or more)</string>
     <string name="tropa_checks_direct_urls">Addresses for the internet check without VPN</string>
     <string name="tropa_checks_urls_hint">One address per line. A server counts as alive when at least one address answers.</string>
     <string name="tropa_checks_reset">Restore defaults</string>
@@ -301,4 +301,37 @@
     <string name="tropa_log_roaming">Roaming</string>
     <string name="tropa_log_paused_weak">Checks paused: weak network</string>
     <string name="tropa_log_paused_roaming">Checks paused: roaming</string>
+    <!-- 0.12: check parameters from the server -->
+    <string name="tropa_checks_server_title">Parameters from the server</string>
+    <string name="tropa_checks_server_text">The server of the connection «%1$s» sent its own check parameters. What you change on this screen wins over them.</string>
+    <string name="tropa_checks_source_default">Default</string>
+    <string name="tropa_checks_source_server">Set by the server</string>
+    <string name="tropa_checks_source_user">Changed by you</string>
+    <string name="tropa_checks_reset_server">Restore the server values</string>
+    <string name="tropa_checks_more">Other parameters</string>
+    <string name="tropa_checks_more_hint">They are set by the server of the connection; without it the defaults apply.</string>
+    <string name="tropa_checks_others">Other servers of the connection</string>
+    <string name="tropa_checks_every">every %1$s</string>
+    <string name="tropa_checks_download">Download check</string>
+    <string name="tropa_checks_download_value">%1$d KB or more, every %2$s</string>
+    <string name="tropa_checks_screen_off">Screen off</string>
+    <string name="tropa_checks_screen_off_value">only the current server, every %1$s</string>
+    <string name="tropa_checks_timeouts">Waiting for an answer</string>
+    <string name="tropa_checks_timeouts_value">latency up to %1$s, download up to %2$s</string>
+    <string name="tropa_checks_fail">A server counts as down</string>
+    <plurals name="tropa_checks_fail_value">
+        <item quantity="one">after %d failed check in a row</item>
+        <item quantity="other">after %d failed checks in a row</item>
+    </plurals>
+    <string name="tropa_checks_better">Moving to a faster server</string>
+    <plurals name="tropa_checks_better_value">
+        <item quantity="one">%1$d %% and %2$d ms faster for %3$d check in a row</item>
+        <item quantity="other">%1$d %% and %2$d ms faster for %3$d checks in a row</item>
+    </plurals>
+    <string name="tropa_duration_seconds">%1$d s</string>
+    <string name="tropa_duration_minutes">%1$d min</string>
+    <string name="tropa_duration_hours">%1$d h</string>
+    <string name="tropa_checks_summary_off">Off</string>
+    <string name="tropa_checks_summary_server">Parameters from the server</string>
+    <string name="tropa_log_checks">Check parameters</string>
 </resources>
