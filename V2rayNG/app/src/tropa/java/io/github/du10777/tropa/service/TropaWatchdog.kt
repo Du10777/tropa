@@ -987,13 +987,19 @@ object TropaWatchdog {
             add("connections ${flow.conns}, failed ${flow.fails}")
         }.joinToString(" · ")
 
-        /** What earlier sessions learned about the servers of the plan (by fingerprint). */
+        /** What earlier sessions learned about the servers of the plan (by fingerprint; not from another IP of the name). */
         private fun restoreHistory() {
             plan.nodes.forEach { node ->
                 if (node.fingerprint.isEmpty()) return@forEach
-                runCatching { NodeHistoryStore.load(node.fingerprint) }.getOrNull()?.let { selector.restore(node.tag, it) }
+                val history = runCatching { NodeHistoryStore.load(node.fingerprint) }.getOrNull() ?: return@forEach
+                if (history.ip != null && history.ip != lastIpOf(node)) return@forEach
+                selector.restore(node.tag, history)
             }
         }
+
+        /** The LastIP of a server's name, null for a server given by IP or not proven yet. */
+        private fun lastIpOf(node: io.github.du10777.tropa.data.Node): String? =
+            Diagnosis.serverResource(node)?.host?.takeIf(ServerAddresses::isName)?.let(ServerAddresses::lastIp)
 
         /** Keeps what this session learned about the servers, at most every minute unless [force]. */
         private fun saveHistory(force: Boolean = false) {
@@ -1003,7 +1009,8 @@ object TropaWatchdog {
             plan.nodes.forEach { node ->
                 if (node.fingerprint.isEmpty()) return@forEach
                 selector.snapshot(node.tag)?.let { history ->
-                    runCatching { NodeHistoryStore.save(node.fingerprint, history) }.onFailure { LogUtil.e(TAG, "cannot save the history of ${node.name}", it) }
+                    runCatching { NodeHistoryStore.save(node.fingerprint, history.copy(ip = lastIpOf(node))) }
+                        .onFailure { LogUtil.e(TAG, "cannot save the history of ${node.name}", it) }
                 }
             }
         }

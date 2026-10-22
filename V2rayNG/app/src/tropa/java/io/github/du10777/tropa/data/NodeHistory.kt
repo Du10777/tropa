@@ -7,7 +7,8 @@ import com.v2ray.ang.handler.MmkvManager
  * What Tropa knows about a server from earlier sessions: its last checks (times and answers), the
  * user's connections through it per hour with the failed ones, and its last speeds. Kept for a week
  * (the window of [NodeSelector]), per server: the fingerprint of its settings, so the same server in a
- * new version of a subscription keeps its history and a changed one starts afresh.
+ * new version of a subscription keeps its history and a changed one starts afresh. It also starts
+ * afresh when the server's name moves to another IP ([ip], its LastIP when the history was written).
  */
 data class NodeHistory(
     val samples: List<Sample> = emptyList(),
@@ -15,6 +16,7 @@ data class NodeHistory(
     val buckets: List<Bucket> = emptyList(),
     val speedKbps: Long? = null,
     val uploadKbps: Long? = null,
+    val ip: String? = null,
 ) {
     data class Sample(val at: Long, val latencyMs: Long, val fetchMs: Long?)
     data class Outcome(val at: Long, val ok: Boolean)
