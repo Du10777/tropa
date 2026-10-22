@@ -47,7 +47,8 @@ data class ProbeEvent(
      * (target = weak | roaming) | checks (server = connection, detail: the check parameters its
      * server sent; ok = false when its Tropa-Checks header was unusable).
      * Details: network (target = wifi | cellular | ethernet | none | other, ok = validated by
-     * Android) | servers | screen_on | screen_off | core (Xray message).
+     * Android) | servers | screen_on | screen_off | core (Xray message) | energy (the battery
+     * budget: a quiet window, what it measured, how it moved the intervals).
      */
     val kind: String,
     val server: String,

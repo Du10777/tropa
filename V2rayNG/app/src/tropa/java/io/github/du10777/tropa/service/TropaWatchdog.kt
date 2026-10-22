@@ -21,10 +21,15 @@ import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.util.LogUtil
 import io.github.du10777.tropa.data.AppUpdates
+import io.github.du10777.tropa.data.BatteryGauge
+import io.github.du10777.tropa.data.BatteryState
 import io.github.du10777.tropa.data.Cellular
+import io.github.du10777.tropa.data.CheckKind
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.Connections
+import io.github.du10777.tropa.data.EnergyBudget
+import io.github.du10777.tropa.data.EnergyStore
 import io.github.du10777.tropa.data.LogLevel
 import io.github.du10777.tropa.data.Node
 import io.github.du10777.tropa.data.NodePlan
@@ -32,6 +37,7 @@ import io.github.du10777.tropa.data.NodePlanner
 import io.github.du10777.tropa.data.NodeSelector
 import io.github.du10777.tropa.data.ProblemReports
 import io.github.du10777.tropa.data.Roaming
+import io.github.du10777.tropa.data.ScreenMode
 import io.github.du10777.tropa.data.SubscriptionRefresher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +61,8 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
+import kotlin.math.roundToLong
 
 /** Starts and stops the watchdog together with the core (runs in the VPN service process). */
 class TropaServiceEventsReceiver : BroadcastReceiver() {
@@ -314,9 +322,8 @@ object TropaWatchdog {
         signalsRegistered = false
     }
 
-    private suspend fun waitForWake(timeoutMs: Long) {
-        withTimeoutOrNull(timeoutMs) { wake.receive() }
-    }
+    /** Waits for a wake-up or the timeout; true when woken (screen on, network change, settings). */
+    private suspend fun waitForWake(timeoutMs: Long): Boolean = withTimeoutOrNull(timeoutMs) { wake.receive() } != null
 
     private data class ProbeResult(
         val ok: Boolean = false,
@@ -360,6 +367,18 @@ object TropaWatchdog {
         /** Check parameters: the user's, then the server's of the connection, then the defaults (read every round). */
         @Volatile
         private var cfg = CheckSettings.DEFAULTS
+
+        /** Keeps the background checks within the battery budget; what it learned survives sessions. */
+        private val energy = EnergyBudget(EnergyStore.settings(), EnergyStore.model())
+
+        @Volatile
+        private var battery = BatteryState.UNKNOWN
+
+        /** The active server answered its last check: only then may the budget pause the checks to measure. */
+        private var activeHealthy = true
+
+        /** The budget factor written to the log last, per screen state (verbose level). */
+        private val loggedScale = HashMap<ScreenMode, Double>()
 
         /** Last outcome and last written check of each server, to keep steady periods short in the log. */
         private val lastOutcome = ConcurrentHashMap<String, Boolean>()
@@ -446,6 +465,7 @@ object TropaWatchdog {
             cfg = runCatching { CheckSettings.current() }.onFailure { LogUtil.e(TAG, "cannot read the check settings", it) }
                 .getOrDefault(cfg)
             selector.tune(cfg)
+            energy.settings = runCatching { EnergyStore.settings() }.getOrDefault(energy.settings)
         }
 
         /** Reads the servers of the configuration the core runs (the saved one, the core starts from it). */
@@ -769,17 +789,25 @@ object TropaWatchdog {
          * (turned off, weak network, roaming), false when every server is dead.
          */
         private suspend fun monitor(): Boolean {
+            // Battery measurements cover steady watching only: an outage or a pause before is not comparable.
+            energy.dropWindow()
             var nextDelay = intervalMs()
             while (currentCoroutineContext().isActive && CheckSettings.enabled) {
-                waitForWake(nextDelay)
+                val woken = waitForWake(nextDelay)
                 refreshSettings()
                 val cell = cellular()
                 if (!CheckSettings.enabled || Roaming.mustBlock(cell) || pauseReasonOf(cell) != null) return true
                 ensureOverride()
                 if (subscriptionChanged.getAndSet(false)) applySubscription()
                 val tag = activeTag ?: return false
+                if (woken && energy.cancelQuiet()) recordEnergy(EnergyBudget.Event.QUIET_DROPPED)
+                if (budgetRound()) {
+                    // A quiet window: the checks pause to measure the phone without them.
+                    nextDelay = (energy.quietUntil() - System.currentTimeMillis()).coerceIn(1_000L, EnergyBudget.QUIET_MS)
+                    continue
+                }
                 val othersDue = plan.isBalanced && screenOn &&
-                    System.currentTimeMillis() - lastOthersAt >= cfg.othersIntervalSec * 1000L
+                    System.currentTimeMillis() - lastOthersAt >= budgetedMs(CheckKind.OTHERS, cfg.othersIntervalSec)
                 // All servers are checked at the same time, the active one included.
                 val tags = if (othersDue) plan.nodes.map { it.tag } else listOf(tag)
                 var results = probeAll(tags)
@@ -790,12 +818,13 @@ object TropaWatchdog {
                     results = probeAll(plan.nodes.map { it.tag }.filter { it != tag })
                     lastOthersAt = System.currentTimeMillis()
                 }
+                activeHealthy = result.ok
                 if (result.ok) {
                     lastLatency = result.latencyMs
                     checkedAt = System.currentTimeMillis()
                 }
                 val now = System.currentTimeMillis()
-                if (screenOn && result.ok && now - lastThroughputAt >= cfg.downloadIntervalSec * 1000L) {
+                if (screenOn && result.ok && now - lastThroughputAt >= budgetedMs(CheckKind.SPEED, cfg.downloadIntervalSec)) {
                     if (!throughputOk(tag)) selector.record(tag, ok = false, latencyMs = null)
                     lastThroughputAt = now
                 }
@@ -813,12 +842,71 @@ object TropaWatchdog {
                     publish(WatchPhase.CONNECTED)
                 }
                 nextDelay = if (result.ok) intervalMs() else RETRY_AFTER_FAILURE_MS
+                logScale()
             }
             return true
         }
 
-        private fun intervalMs(): Long =
-            (if (screenOn) cfg.activeIntervalSec else cfg.screenOffIntervalSec) * 1000L
+        /** The interval of the active server check after the battery budget, ms. */
+        private fun intervalMs(): Long {
+            val mode = screenMode()
+            val kind = if (mode == ScreenMode.ON) CheckKind.ACTIVE else CheckKind.SCREEN_OFF
+            val seed = if (mode == ScreenMode.ON) cfg.activeIntervalSec else cfg.screenOffIntervalSec
+            return energy.intervalSec(kind, seed, mode, battery, planned(mode)) * 1000L
+        }
+
+        /** The interval of a screen-on check of [kind] after the battery budget, ms. */
+        private fun budgetedMs(kind: CheckKind, seedSec: Int): Long =
+            energy.intervalSec(kind, seedSec, ScreenMode.ON, battery, planned(ScreenMode.ON)) * 1000L
+
+        private fun planned(mode: ScreenMode): Double = EnergyBudget.plannedFetchesPerHour(mode, cfg, plan.nodes.size)
+
+        private fun screenMode(): ScreenMode = if (screenOn) ScreenMode.ON else ScreenMode.OFF
+
+        /** Reads the battery and moves the measurement windows; true while a quiet window pauses the checks. */
+        private fun budgetRound(): Boolean {
+            val now = System.currentTimeMillis()
+            battery = runCatching { BatteryGauge.read(context) }.getOrDefault(BatteryState.UNKNOWN)
+            energy.tick(now, screenMode(), battery, activeHealthy)?.let { event ->
+                if (event == EnergyBudget.Event.BASE_MEASURED || event == EnergyBudget.Event.COST_MEASURED) {
+                    runCatching { EnergyStore.saveModel(energy.model) }.onFailure { LogUtil.e(TAG, "cannot save the energy model", it) }
+                }
+                recordEnergy(event)
+            }
+            return energy.quiet(now)
+        }
+
+        /** Budget events go to the log from the verbose level. */
+        private fun recordEnergy(event: EnergyBudget.Event) {
+            if (ConnectionLog.level < LogLevel.VERBOSE) return
+            val model = energy.model
+            val detail = when (event) {
+                EnergyBudget.Event.QUIET_STARTED -> "checks paused for ${EnergyBudget.QUIET_MS / 60_000} min to measure the battery without them"
+                EnergyBudget.Event.QUIET_DROPPED -> "battery measurement dropped, checks resume"
+                EnergyBudget.Event.BASE_MEASURED -> "phone without checks: ${model.baseUahPerHour?.roundToLong()} µAh/h"
+                EnergyBudget.Event.COST_MEASURED ->
+                    "one check request ≈ ${"%.1f".format(Locale.ROOT, model.uahPerFetch ?: 0.0)} µAh (${model.samples} measurements)"
+            }
+            record(ProbeEvent(System.currentTimeMillis(), "energy", "", null, "", ok = true, detail = detail))
+        }
+
+        /** Writes the budget factor when it moves the intervals by more than a tenth (verbose level). */
+        private fun logScale() {
+            if (ConnectionLog.level < LogLevel.VERBOSE) return
+            val mode = screenMode()
+            val scale = energy.scale(mode, battery, planned(mode))
+            val last = loggedScale[mode] ?: 1.0
+            val moved = if (scale.isInfinite() || last.isInfinite()) scale != last else abs(scale - last) > last * 0.1
+            if (!moved) return
+            loggedScale[mode] = scale
+            val screen = if (mode == ScreenMode.ON) "screen on" else "screen off"
+            val detail = if (scale.isInfinite()) {
+                "$screen: battery saver or low battery, checks at their longest intervals"
+            } else {
+                "$screen: battery budget ×${"%.2f".format(Locale.ROOT, scale)}, the current server every ${intervalMs() / 1000} s"
+            }
+            record(ProbeEvent(System.currentTimeMillis(), "energy", "", null, "", ok = true, detail = detail))
+        }
 
         private fun switchTo(tag: String, reason: String) {
             LogUtil.i(TAG, "switching new connections to $tag ($reason)")
@@ -950,6 +1038,7 @@ object TropaWatchdog {
         }
 
         private fun probe(tag: String, url: String, timeoutMs: Long, maxBytes: Long): ProbeResult = try {
+            energy.countFetch()
             val json = CoreServiceManager.coreController.tropaProbe(tag, url, timeoutMs, maxBytes)
             gson.fromJson(json, ProbeResult::class.java) ?: ProbeResult(error = "empty result")
         } catch (e: Exception) {

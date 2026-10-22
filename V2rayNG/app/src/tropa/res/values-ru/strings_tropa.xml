@@ -341,4 +341,13 @@
     <string name="tropa_checks_summary_off">Выключена</string>
     <string name="tropa_checks_summary_server">Параметры от сервера</string>
     <string name="tropa_log_checks">Параметры проверок</string>
+    <!-- Переработка проверок: энергобюджет фоновых проверок -->
+    <string name="tropa_energy_title">Заряд на фоновые проверки</string>
+    <string name="tropa_energy_hint">Сколько заряда Тропе можно тратить на фоновые проверки связи. Меньше — экономнее батарея, но реже проверки и медленнее реакция на обрыв. Интервалы выше — стартовые: Тропа сама меряет расход и при перерасходе проверяет реже, при запасе — чаще.</string>
+    <string name="tropa_energy_screen_off">Экран выключен: %1$d %% за %2$d ч</string>
+    <string name="tropa_energy_screen_on">Экран включён: %1$d %% за %2$d ч</string>
+    <string name="tropa_energy_percent">%1$d %%</string>
+    <string name="tropa_energy_unmeasured">Расход ещё не измерен: проверки идут с обычными интервалами. Тропа меряет его при выключенном экране, это занимает несколько часов.</string>
+    <string name="tropa_energy_measured">Измерено: один запрос проверки ≈ %1$s мкА·ч (замеров: %2$d)</string>
+    <string name="tropa_log_energy">Энергобюджет</string>
 </resources>

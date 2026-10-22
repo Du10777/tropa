@@ -182,7 +182,7 @@ object ConnectionLog {
     )
 
     /** Small notes: shown as plain grey lines. */
-    val NOTE_KINDS = setOf("screen_on", "screen_off", "core")
+    val NOTE_KINDS = setOf("screen_on", "screen_off", "core", "energy")
 
     /** Kinds whose target is part of the title (network type, log level, why the checks pause). */
     private val TARGET_IN_TITLE = setOf("network", "level", "paused")
@@ -226,6 +226,7 @@ object ConnectionLog {
             "subscription" -> R.string.tropa_log_subscription
             "roaming" -> R.string.tropa_log_roaming
             "checks" -> R.string.tropa_log_checks
+            "energy" -> R.string.tropa_log_energy
             else -> R.string.tropa_log_reload
         }
     )

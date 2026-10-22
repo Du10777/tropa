@@ -334,4 +334,13 @@
     <string name="tropa_checks_summary_off">Off</string>
     <string name="tropa_checks_summary_server">Parameters from the server</string>
     <string name="tropa_log_checks">Check parameters</string>
+    <!-- Checks redesign: battery budget of the background checks -->
+    <string name="tropa_energy_title">Battery for background checks</string>
+    <string name="tropa_energy_hint">How much battery Tropa may spend on background connection checks. Less saves the battery, but the checks get rarer and a dropped connection is noticed later. The intervals above are where the checks start: Tropa measures its use and checks less often when over the limit, more often when there is room.</string>
+    <string name="tropa_energy_screen_off">Screen off: %1$d %% in %2$d h</string>
+    <string name="tropa_energy_screen_on">Screen on: %1$d %% in %2$d h</string>
+    <string name="tropa_energy_percent">%1$d %%</string>
+    <string name="tropa_energy_unmeasured">Not measured yet: the checks run at their usual intervals. Tropa measures with the screen off, it takes a few hours.</string>
+    <string name="tropa_energy_measured">Measured: one check request ≈ %1$s µAh (measurements: %2$d)</string>
+    <string name="tropa_log_energy">Battery budget</string>
 </resources>

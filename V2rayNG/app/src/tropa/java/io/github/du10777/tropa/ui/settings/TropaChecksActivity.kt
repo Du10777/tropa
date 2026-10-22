@@ -43,10 +43,15 @@ import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.CheckSource
 import io.github.du10777.tropa.data.CheckValues
 import io.github.du10777.tropa.data.Connections
+import io.github.du10777.tropa.data.EnergyModel
+import io.github.du10777.tropa.data.EnergySettings
+import io.github.du10777.tropa.data.EnergyStore
 import io.github.du10777.tropa.service.TropaServiceEventsReceiver
 import io.github.du10777.tropa.ui.common.TropaTopBar
 import io.github.du10777.tropa.ui.theme.TropaColors
 import io.github.du10777.tropa.ui.theme.TropaTheme
+import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * Settings → Connection check: on/off, how often, the addresses used to check, and the rest of the
@@ -68,6 +73,8 @@ class TropaChecksActivity : BaseComponentActivity() {
             var latency by remember { mutableStateOf(values.latencyUrls.joinToString("\n")) }
             var download by remember { mutableStateOf(values.downloadUrls.joinToString("\n")) }
             var direct by remember { mutableStateOf(values.directUrls.joinToString("\n")) }
+            var energy by remember { mutableStateOf(EnergyStore.settings()) }
+            val energyModel = remember { EnergyStore.model() }
 
             fun saved() {
                 user = CheckSettings.user()
@@ -129,20 +136,14 @@ class TropaChecksActivity : BaseComponentActivity() {
                         Card {
                             Column(Modifier.padding(16.dp)) {
                                 Text(stringResource(R.string.tropa_checks_interval), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                val choices = (CheckSettings.ACTIVE_INTERVAL_CHOICES + base.activeIntervalSec + values.activeIntervalSec).distinct().sorted()
-                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    choices.forEach { seconds ->
-                                        FilterChip(
-                                            selected = values.activeIntervalSec == seconds,
-                                            onClick = {
-                                                CheckSettings.setActiveInterval(seconds, base)
-                                                user = CheckSettings.user()
-                                                TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
-                                            },
-                                            label = { Text(stringResource(R.string.tropa_checks_interval_value, seconds)) },
-                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TropaColors.Brand, selectedLabelColor = Color.White),
-                                        )
-                                    }
+                                ChipRow(
+                                    choices = (CheckSettings.ACTIVE_INTERVAL_CHOICES + base.activeIntervalSec + values.activeIntervalSec).distinct().sorted(),
+                                    selected = values.activeIntervalSec,
+                                    label = { stringResource(R.string.tropa_checks_interval_value, it) },
+                                ) { seconds ->
+                                    CheckSettings.setActiveInterval(seconds, base)
+                                    user = CheckSettings.user()
+                                    TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
                                 }
                                 SourceText(CheckSettings.source(user.activeIntervalSec, server?.activeIntervalSec))
                             }
@@ -166,6 +167,11 @@ class TropaChecksActivity : BaseComponentActivity() {
                             }) { Text(stringResource(R.string.tropa_checks_save)) }
                         }
                         MoreCard(values, server)
+                        EnergyCard(energy, energyModel) { changed ->
+                            energy = changed
+                            EnergyStore.saveSettings(changed)
+                            TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
+                        }
                     }
                 }
             }
@@ -210,6 +216,65 @@ private fun MoreCard(values: CheckValues, server: CheckParams?) {
                 server?.betterPercent != null || server?.betterMinMs != null || server?.betterRounds != null,
             )
             Text(stringResource(R.string.tropa_checks_more_hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** How much battery the background checks may use, and what Tropa measured so far. */
+@Composable
+private fun EnergyCard(settings: EnergySettings, model: EnergyModel, onChange: (EnergySettings) -> Unit) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.tropa_energy_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.tropa_energy_hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            EnergyRow(
+                stringResource(R.string.tropa_energy_screen_off, settings.screenOffPercent, settings.screenOffHours),
+                settings.screenOffPercent,
+                settings.screenOffHours,
+                onPercent = { onChange(settings.copy(screenOffPercent = it)) },
+                onHours = { onChange(settings.copy(screenOffHours = it)) },
+            )
+            EnergyRow(
+                stringResource(R.string.tropa_energy_screen_on, settings.screenOnPercent, settings.screenOnHours),
+                settings.screenOnPercent,
+                settings.screenOnHours,
+                onPercent = { onChange(settings.copy(screenOnPercent = it)) },
+                onHours = { onChange(settings.copy(screenOnHours = it)) },
+            )
+            Text(
+                model.uahPerFetch?.let { stringResource(R.string.tropa_energy_measured, formatUah(it), model.samples) }
+                    ?: stringResource(R.string.tropa_energy_unmeasured),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EnergyRow(title: String, percent: Int, hours: Int, onPercent: (Int) -> Unit, onHours: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        ChipRow((EnergySettings.PERCENT_CHOICES + percent).distinct().sorted(), percent, { stringResource(R.string.tropa_energy_percent, it) }, onPercent)
+        ChipRow((EnergySettings.HOURS_CHOICES + hours).distinct().sorted(), hours, { stringResource(R.string.tropa_duration_hours, it) }, onHours)
+    }
+}
+
+/** 0.8, 12, 140: one decimal below ten. */
+private fun formatUah(value: Double): String =
+    if (value < 10) String.format(Locale.getDefault(), "%.1f", value) else value.roundToInt().toString()
+
+/** One choice out of a few numbers, as chips in a row. */
+@Composable
+private fun ChipRow(choices: List<Int>, selected: Int, label: @Composable (Int) -> String, onSelect: (Int) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        choices.forEach { value ->
+            FilterChip(
+                selected = value == selected,
+                onClick = { onSelect(value) },
+                label = { Text(label(value)) },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TropaColors.Brand, selectedLabelColor = Color.White),
+            )
         }
     }
 }
