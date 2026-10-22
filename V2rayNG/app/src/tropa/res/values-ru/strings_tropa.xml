@@ -357,5 +357,23 @@
     <string name="tropa_log_mode">Способ проверки</string>
     <string name="tropa_log_flow">Трафик через сервер</string>
     <string name="tropa_checks_upload">Проверять скорость отдачи (upload)</string>
+    <!-- Диагностика, когда ни один сервер не отвечает -->
+    <string name="tropa_status_no_network">Нет подключения к сети</string>
+    <string name="tropa_status_no_network_hint">Жду, когда появится сеть</string>
+    <string name="tropa_status_offline">Нет подключения к интернету</string>
+    <string name="tropa_status_offline_hint">Сеть есть, но интернет не отвечает. Жду, когда он появится</string>
+    <string name="tropa_status_whitelist">Вы в зоне белых списков</string>
+    <string name="tropa_status_whitelist_hint">Открываются только разрешённые сайты. Переподключаюсь… попытка %1$d, следующая через %2$d с</string>
+    <string name="tropa_status_blocked">Серверы заблокированы</string>
+    <string name="tropa_status_blocked_hint">Интернет работает, но все серверы недоступны. Запросите у администратора новую ссылку. Попытка %1$d, следующая через %2$d с</string>
+    <string name="tropa_status_reachable">Серверы доступны, подключаюсь…</string>
+    <string name="tropa_status_reachable_hint">Попытка %1$d, следующая через %2$d с</string>
+    <string name="tropa_log_diagnosis">Диагностика: %1$s</string>
+    <string name="tropa_log_reach">доступность</string>
+    <string name="tropa_diag_no_network">нет сети</string>
+    <string name="tropa_diag_no_internet">нет интернета</string>
+    <string name="tropa_diag_whitelist">белые списки</string>
+    <string name="tropa_diag_servers_blocked">серверы заблокированы</string>
+    <string name="tropa_diag_servers_reachable">серверы доступны</string>
     <string name="tropa_checks_upload_hint">Обычно хватает проверки скорости скачивания. Включите, если важна и скорость отправки (видеозвонки, выгрузка файлов). Удваивает тест-трафик.</string>
 </resources>

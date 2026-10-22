@@ -412,14 +412,26 @@ private fun StatusBlock(state: MainUiState, onClick: (() -> Unit)? = null) {
             }
 
             WatchPhase.NO_SERVER -> {
-                title = stringResource(R.string.tropa_status_no_server)
                 val wait = ((watch.nextRetryAt - now) / 1000).coerceAtLeast(0).toInt()
-                hint = stringResource(R.string.tropa_status_no_server_hint, watch.attempt, wait)
+                // What the diagnosis found tells the person more than "no connection".
+                val (titleRes, hintRes) = when (watch.diagnosis) {
+                    "WHITELIST" -> R.string.tropa_status_whitelist to R.string.tropa_status_whitelist_hint
+                    "SERVERS_BLOCKED" -> R.string.tropa_status_blocked to R.string.tropa_status_blocked_hint
+                    "SERVERS_REACHABLE" -> R.string.tropa_status_reachable to R.string.tropa_status_reachable_hint
+                    else -> R.string.tropa_status_no_server to R.string.tropa_status_no_server_hint
+                }
+                title = stringResource(titleRes)
+                hint = stringResource(hintRes, watch.attempt, wait)
             }
 
             WatchPhase.NO_INTERNET -> {
-                title = stringResource(R.string.tropa_status_no_internet)
-                hint = stringResource(R.string.tropa_status_no_internet_hint)
+                val (titleRes, hintRes) = when (watch.diagnosis) {
+                    "NO_NETWORK" -> R.string.tropa_status_no_network to R.string.tropa_status_no_network_hint
+                    "NO_INTERNET" -> R.string.tropa_status_offline to R.string.tropa_status_offline_hint
+                    else -> R.string.tropa_status_no_internet to R.string.tropa_status_no_internet_hint
+                }
+                title = stringResource(titleRes)
+                hint = stringResource(hintRes)
             }
 
             WatchPhase.CHECKS_OFF -> {
@@ -774,16 +786,15 @@ private fun ProfileBlock(profile: ProfileDetails, watch: WatchState?) {
                     Column(Modifier.weight(1f)) {
                         Text(listOfNotNull(node.protocol.ifEmpty { null }, node.address).joinToString(" · "), fontSize = 14.sp)
                         node.transport?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        // The last speed check (or the user's traffic seen through the server) under its address.
+                        live?.speedKbps?.takeIf { live.alive == true }?.let { kbps ->
+                            val context = LocalContext.current
+                            val up = live.uploadKbps?.let { "  ↑ " + speedText(context, it * 125) }.orEmpty()
+                            Text("↓ " + speedText(context, kbps * 125) + up, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                     if (live?.alive == true && live.latencyMs != null) {
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(stringResource(R.string.tropa_value_ms, live.latencyMs), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            live.speedKbps?.let { kbps ->
-                                val context = LocalContext.current
-                                val up = live.uploadKbps?.let { " ↑ " + speedText(context, it * 125) }.orEmpty()
-                                Text("↓ " + speedText(context, kbps * 125) + up, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                        Text(stringResource(R.string.tropa_value_ms, live.latencyMs), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (live?.active == true) {
                         Surface(shape = CircleShape, color = TropaColors.Brand, modifier = Modifier.size(8.dp)) {}

@@ -52,6 +52,8 @@ class NodeChecksTest {
         var now = 1_000_000L
         val support = SelfTestSupport { now }
         assertEquals(SelfTestSupport.State.UNKNOWN, support.state("a"))
+        assertFalse(support.no("a")) // one answer without the self-test may be a broken connection
+        assertEquals(SelfTestSupport.State.UNKNOWN, support.state("a"))
         assertTrue(support.no("a"))
         assertFalse(support.no("a")) // not news
         assertEquals(SelfTestSupport.State.NO, support.state("a"))
@@ -60,7 +62,10 @@ class NodeChecksTest {
         assertTrue(support.yes("a"))
         assertFalse(support.yes("a"))
         assertEquals(SelfTestSupport.State.YES, support.state("a"))
-        // A node that lost its self-test goes back to the classic checks.
+        // A node that lost its self-test goes back to the classic checks; a self-test in between resets the count.
+        assertFalse(support.no("a"))
+        support.yes("a")
+        assertFalse(support.no("a"))
         assertTrue(support.no("a"))
         assertEquals(SelfTestSupport.State.NO, support.state("a"))
     }

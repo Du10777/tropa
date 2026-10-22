@@ -2,6 +2,7 @@ package io.github.du10777.tropa.data
 
 import android.content.Context
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 
@@ -19,6 +20,8 @@ object Cellular {
         val networkMcc: String? = null,
         val homeMcc: String? = null,
         val generation: Generation = Generation.UNKNOWN,
+        /** Signal bars 0–4 (Android 9+), null when unknown. */
+        val signalLevel: Int? = null,
     ) {
         /** Roaming is another country: a foreign network inside the home country does not count. */
         val roaming: Boolean get() = cellular && networkMcc != null && homeMcc != null && networkMcc != homeMcc
@@ -50,6 +53,9 @@ object Cellular {
             networkMcc = mccOf(telephony?.networkOperator),
             homeMcc = mccOf(telephony?.simOperator),
             generation = generation,
+            signalLevel = telephony?.let { tm ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) runCatching { tm.signalStrength?.level }.getOrNull() else null
+            },
         )
     }
 

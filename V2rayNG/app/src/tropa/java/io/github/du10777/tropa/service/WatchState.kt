@@ -58,7 +58,9 @@ data class ProbeEvent(
      * Android) | servers | screen_on | screen_off | core (Xray message) | energy (the battery
      * budget: a quiet window, what it measured, how it moved the intervals) | mode (a server is
      * checked by the self-test of its node, or the classic way) | flow (the core's counters of the
-     * current server: the user's traffic, failing connections).
+     * current server: the user's traffic, failing connections) | diagnosis (no server answers:
+     * target = the verdict, detail = what answered) | reach (debug: one resource of the diagnosis,
+     * server = its name, address = host:port, target = its group, detail = ping, port, web).
      */
     val kind: String,
     val server: String,
@@ -92,6 +94,8 @@ data class WatchState(
     val pause: String? = null,
     /** The country (MCC) of the roaming network, in the ROAMING phase. */
     val roamingMcc: String? = null,
+    /** What the diagnosis found (Diagnosis.Verdict name), in the NO_SERVER and NO_INTERNET phases. */
+    val diagnosis: String? = null,
 )
 
 /**

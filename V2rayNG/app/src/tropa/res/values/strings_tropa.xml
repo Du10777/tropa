@@ -350,5 +350,23 @@
     <string name="tropa_log_mode">Check method</string>
     <string name="tropa_log_flow">Traffic through the server</string>
     <string name="tropa_checks_upload">Check the upload speed too</string>
+    <!-- Diagnosis when no server answers -->
+    <string name="tropa_status_no_network">No network connection</string>
+    <string name="tropa_status_no_network_hint">Waiting for the network to come back</string>
+    <string name="tropa_status_offline">No internet connection</string>
+    <string name="tropa_status_offline_hint">The network is there, but the internet does not answer. Waiting for it</string>
+    <string name="tropa_status_whitelist">You are in a white-list zone</string>
+    <string name="tropa_status_whitelist_hint">Only allowed sites open. Reconnecting… attempt %1$d, next in %2$d s</string>
+    <string name="tropa_status_blocked">The servers are blocked</string>
+    <string name="tropa_status_blocked_hint">The internet works, but none of the servers can be reached. Ask your administrator for a new link. Attempt %1$d, next in %2$d s</string>
+    <string name="tropa_status_reachable">Servers reachable, connecting…</string>
+    <string name="tropa_status_reachable_hint">Attempt %1$d, next in %2$d s</string>
+    <string name="tropa_log_diagnosis">Diagnosis: %1$s</string>
+    <string name="tropa_log_reach">reachability</string>
+    <string name="tropa_diag_no_network">no network</string>
+    <string name="tropa_diag_no_internet">no internet</string>
+    <string name="tropa_diag_whitelist">white lists</string>
+    <string name="tropa_diag_servers_blocked">servers blocked</string>
+    <string name="tropa_diag_servers_reachable">servers reachable</string>
     <string name="tropa_checks_upload_hint">The download speed check is usually enough. Turn this on if the sending speed matters too (video calls, uploading files). Doubles the test traffic.</string>
 </resources>

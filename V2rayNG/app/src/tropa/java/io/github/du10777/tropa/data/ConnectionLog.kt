@@ -178,17 +178,17 @@ object ConnectionLog {
     /** Events that mark sessions and changes rather than checks: shown as chips. */
     val SESSION_KINDS = setOf(
         "start", "stop", "connected", "no_server", "no_internet", "reload", "switch", "network", "servers", "level",
-        "subscription", "roaming", "paused", "checks",
+        "subscription", "roaming", "paused", "checks", "diagnosis",
     )
 
     /** Small notes: shown as plain grey lines. */
-    val NOTE_KINDS = setOf("screen_on", "screen_off", "core", "energy", "mode", "flow")
+    val NOTE_KINDS = setOf("screen_on", "screen_off", "core", "energy", "mode", "flow", "reach")
 
     /** Checks that move data: the result shows the bytes too. */
     val BYTE_KINDS = setOf("download", "selftest", "speed", "upload")
 
     /** Kinds whose target is part of the title (network type, log level, why the checks pause). */
-    private val TARGET_IN_TITLE = setOf("network", "level", "paused")
+    private val TARGET_IN_TITLE = setOf("network", "level", "paused", "diagnosis")
 
     /** The headline of an event: "Network: Wi-Fi", "Log level: Debug", "Latency". */
     fun title(context: Context, e: ProbeEvent): String = when (e.kind) {
@@ -198,7 +198,18 @@ object ConnectionLog {
             LogLevel.entries.firstOrNull { it.name == e.target }?.let { context.getString(it.title) } ?: e.target,
         )
         "paused" -> context.getString(if (e.target == "roaming") R.string.tropa_log_paused_roaming else R.string.tropa_log_paused_weak)
+        "diagnosis" -> context.getString(R.string.tropa_log_diagnosis, verdictLabel(context, e.target))
         else -> kindLabel(context, e.kind)
+    }
+
+    /** The verdict of a diagnosis (Diagnosis.Verdict, lower case in the log). */
+    fun verdictLabel(context: Context, verdict: String): String = when (verdict.lowercase(Locale.ROOT)) {
+        "no_network" -> context.getString(R.string.tropa_diag_no_network)
+        "no_internet" -> context.getString(R.string.tropa_diag_no_internet)
+        "whitelist" -> context.getString(R.string.tropa_diag_whitelist)
+        "servers_blocked" -> context.getString(R.string.tropa_diag_servers_blocked)
+        "servers_reachable" -> context.getString(R.string.tropa_diag_servers_reachable)
+        else -> verdict
     }
 
     fun networkLabel(context: Context, type: String): String = context.getString(
@@ -220,6 +231,7 @@ object ConnectionLog {
             "upload" -> R.string.tropa_log_upload
             "mode" -> R.string.tropa_log_mode
             "flow" -> R.string.tropa_log_flow
+            "reach" -> R.string.tropa_log_reach
             "direct" -> R.string.tropa_log_direct
             "start" -> R.string.tropa_log_start
             "stop" -> R.string.tropa_log_stop

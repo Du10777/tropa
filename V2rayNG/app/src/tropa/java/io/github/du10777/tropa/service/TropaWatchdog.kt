@@ -28,6 +28,7 @@ import io.github.du10777.tropa.data.CheckKind
 import io.github.du10777.tropa.data.CheckSettings
 import io.github.du10777.tropa.data.ConnectionLog
 import io.github.du10777.tropa.data.Connections
+import io.github.du10777.tropa.data.Diagnosis
 import io.github.du10777.tropa.data.EnergyBudget
 import io.github.du10777.tropa.data.EnergyStore
 import io.github.du10777.tropa.data.LogLevel
@@ -59,14 +60,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.net.Inet6Address
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.roundToLong
@@ -78,6 +76,7 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
             ACTION_WAKE -> return TropaWatchdog.wakeUp()
             ACTION_SUBSCRIPTION_CHANGED -> return TropaWatchdog.onSubscriptionChanged()
             ACTION_TEST_CELLULAR -> return testCellular(intent)
+            ACTION_TEST_SPEED -> return TropaWatchdog.measureSpeedSoon()
         }
         when (intent.getIntExtra("key", 0)) {
             AppConfig.MSG_STATE_START_SUCCESS -> TropaWatchdog.start(context)
@@ -91,10 +90,13 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
 
         /**
          * Test bench without a SIM: pretend a mobile network (extras network_mcc, home_mcc,
-         * generation 2g/3g/4g/5g; clear=true goes back to the real one). The receiver is not
+         * generation 2g/3g/4g/5g, signal 0-4; clear=true goes back to the real one). The receiver is not
          * exported, so only root or the system can send it (adb root + am broadcast -n).
          */
         const val ACTION_TEST_CELLULAR = "io.github.du10777.tropa.action.TEST_CELLULAR"
+
+        /** Test bench: measure the speed of the current server at the next round (root only, like TEST_CELLULAR). */
+        const val ACTION_TEST_SPEED = "io.github.du10777.tropa.action.TEST_SPEED"
 
         /** Lets the watchdog (VPN service process) pick up changed settings right away. */
         fun wakeWatchdog(context: Context) {
@@ -118,6 +120,7 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
                     "5g" -> Cellular.Generation.G5
                     else -> Cellular.Generation.UNKNOWN
                 },
+                signalLevel = intent.getIntExtra("signal", -1).takeIf { it in 0..4 },
             )
             TropaWatchdog.wakeUp()
         }
@@ -289,6 +292,14 @@ object TropaWatchdog {
         wake.trySend(Unit)
     }
 
+    /** The speed of the current server is measured at the next round (test bench). */
+    private val speedSoon = AtomicBoolean(false)
+
+    fun measureSpeedSoon() {
+        speedSoon.set(true)
+        wakeUp()
+    }
+
     /** The active subscription has new servers: they go into the running core, nothing restarts. */
     fun onSubscriptionChanged() {
         subscriptionChanged.set(true)
@@ -414,19 +425,16 @@ object TropaWatchdog {
         /** Server choices of the background end of the connect and of the watch rounds do not interleave. */
         private val steer = Any()
 
+        /** What the network lets through, asked when no server answers (once per outage and network, see [diagnose]). */
+        private var diagnosis: Diagnosis.Result? = null
+        private var diagnosedAt = 0L
+        private var diagnosedNetwork: String? = null
+
         /** Last outcome and last written check of each server, to keep steady periods short in the log. */
         private val lastOutcome = ConcurrentHashMap<String, Boolean>()
         private val lastWrittenAt = ConcurrentHashMap<String, Long>()
         private val trafficBaseRx = TrafficStats.getUidRxBytes(Process.myUid()).coerceAtLeast(0)
         private val trafficBaseTx = TrafficStats.getUidTxBytes(Process.myUid()).coerceAtLeast(0)
-
-        private val direct by lazy {
-            OkHttpClient.Builder()
-                .connectTimeout(5, TimeUnit.SECONDS)
-                .callTimeout(6, TimeUnit.SECONDS)
-                .followRedirects(false)
-                .build()
-        }
 
         suspend fun run() {
             record(ProbeEvent(System.currentTimeMillis(), "start", "", null, "", ok = true))
@@ -466,7 +474,9 @@ object TropaWatchdog {
                     if (monitor()) continue
                 }
                 attempt++
-                if (!internetUp()) {
+                // No server answers: what does the network let through? Nothing at all = the phone's
+                // own network is down, then Tropa waits for it instead of reconnecting.
+                if (Diagnosis.offline(diagnose().verdict)) {
                     connectedAt = 0L
                     publish(WatchPhase.NO_INTERNET)
                     notifyLost()
@@ -856,7 +866,7 @@ object TropaWatchdog {
                     checkedAt = now
                     lastActiveCheckAt = now
                     if (ConnectionLog.level == LogLevel.DEBUG) {
-                        record(ProbeEvent(now, "flow", serverName(tag), null, "", ok = true, detail = flowDetail(flow!!)))
+                        record(ProbeEvent(now, "flow", serverName(tag), null, "", ok = true, detail = flowDetail(flow)))
                     }
                     if (!steerAfter(tag)) return false
                     nextDelay = intervalMs()
@@ -881,6 +891,7 @@ object TropaWatchdog {
                 }
                 val after = System.currentTimeMillis()
                 val speedAt = budgetedMs(CheckKind.SPEED, cfg.downloadIntervalSec)
+                if (speedSoon.getAndSet(false)) speedDue = true
                 if (screenOn && result.ok && !carries && (speedDue || after - lastThroughputAt >= speedAt)) {
                     if (result.selftest) measureSpeed(tag)
                     else if (!throughputOk(tag)) selector.record(tag, ok = false, latencyMs = null)
@@ -1275,15 +1286,51 @@ object TropaWatchdog {
 
         private fun record(event: ProbeEvent) = ConnectionLog.append(context, event)
 
-        /** Direct request outside the tunnel (the app itself is excluded from its VPN). */
-        private fun internetUp(): Boolean = cfg.directUrls.any { url ->
-            val started = System.currentTimeMillis()
-            var status = 0
-            val error = runCatching { direct.newCall(Request.Builder().url(url).build()).execute().use { status = it.code }; null }
-                .getOrElse { it.message ?: it.javaClass.simpleName }
-            val detail = if (ConnectionLog.level == LogLevel.DEBUG && status > 0) "HTTP $status" else null
-            recordResult(ProbeEvent(started, "direct", "", null, url, ok = error == null, latencyMs = System.currentTimeMillis() - started, error = error, detail = detail))
-            error == null
+        /**
+         * Probes directly, outside the tunnel, what the network lets through: the servers, white-list
+         * sites, foreign sites, and the gateway when nothing answers (see [Diagnosis]). Held for the
+         * same network: [Diagnosis.TTL_MS], or one pause when the network itself seemed down (that
+         * changes fast); a network change asks again.
+         */
+        private suspend fun diagnose(): Diagnosis.Result {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            val network = cm?.let { runCatching { underlyingNetwork(it) }.getOrNull() }
+            val key = network?.toString() ?: "none"
+            val now = System.currentTimeMillis()
+            diagnosis?.let { held ->
+                val ttl = if (Diagnosis.offline(held.verdict)) NO_INTERNET_RECHECK_MS - 5_000 else Diagnosis.TTL_MS
+                if (key == diagnosedNetwork && now - diagnosedAt < ttl) return held
+            }
+            val result = if (cm == null || network == null) {
+                Diagnosis.Result(Diagnosis.Verdict.NO_NETWORK, emptyMap(), null)
+            } else {
+                val probe = NetworkProbe(network)
+                val probes = probe.probeAll(Diagnosis.resources(plan.nodes, cfg.directUrls), Diagnosis.parallel(cellular()))
+                val gateway = if (probes.values.none { it.reach == Diagnosis.Reach.AVAILABLE }) probe.gatewayAnswers(cm) else null
+                Diagnosis.Result(Diagnosis.verdict(probes, gateway), probes, gateway)
+            }
+            diagnosis = result
+            diagnosedAt = System.currentTimeMillis()
+            diagnosedNetwork = key
+            recordDiagnosis(result, startedAt = now)
+            return result
+        }
+
+        /** The verdict as a log chip; every resource at the debug level. */
+        private fun recordDiagnosis(result: Diagnosis.Result, startedAt: Long) {
+            if (ConnectionLog.level == LogLevel.DEBUG) {
+                result.probes.forEach { (resource, probe) ->
+                    record(
+                        ProbeEvent(
+                            startedAt, "reach", resource.label, "${resource.host}:${resource.port}",
+                            resource.group.name.lowercase(Locale.ROOT), ok = probe.reach == Diagnosis.Reach.AVAILABLE,
+                            detail = probe.describe(),
+                        ),
+                    )
+                }
+            }
+            val verdict = result.verdict.name.lowercase(Locale.ROOT)
+            record(ProbeEvent(System.currentTimeMillis(), "diagnosis", "", null, verdict, ok = false, detail = result.summary()))
         }
 
         private fun reconnect(attempt: Int, rotate: Boolean) {
@@ -1309,6 +1356,7 @@ object TropaWatchdog {
         private fun onConnected() {
             if (connectedAt == 0L) connectedAt = System.currentTimeMillis()
             subscriptionRetried = false
+            diagnosis = null
             scope.launch {
                 refreshDueSubscriptions()
                 checkAppUpdate()
@@ -1380,6 +1428,7 @@ object TropaWatchdog {
                     lockdown = if (q) vpn?.isLockdownEnabled else null,
                     connectedAt = if (phase == WatchPhase.CONNECTED || phase == WatchPhase.CHECKS_OFF || phase == WatchPhase.PAUSED) connectedAt else 0L,
                     pause = pauseReason.takeIf { phase == WatchPhase.PAUSED },
+                    diagnosis = diagnosis?.verdict?.name?.takeIf { phase == WatchPhase.NO_SERVER || phase == WatchPhase.NO_INTERNET },
                     roamingMcc = roamingMcc.takeIf { phase == WatchPhase.ROAMING },
                     trafficBaseRx = trafficBaseRx,
                     trafficBaseTx = trafficBaseTx,

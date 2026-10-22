@@ -112,13 +112,16 @@ data class SpeedResult(
 
 /**
  * Which servers answer the self-test, by server (its fingerprint, so a new tag after a subscription
- * update keeps it). Unknown servers are asked; a "no" is asked again after [SelfTest.RETRY_UNSUPPORTED_MS].
+ * update keeps it). Unknown servers are asked; a "no" takes [STRIKES] answers in a row without the
+ * self-test (one could be a connection that broke for a moment) and is asked again after
+ * [SelfTest.RETRY_UNSUPPORTED_MS].
  */
 class SelfTestSupport(private val now: () -> Long = { System.currentTimeMillis() }) {
     enum class State { UNKNOWN, YES, NO }
 
     private val yes = HashSet<String>()
     private val noUntil = HashMap<String, Long>()
+    private val strikes = HashMap<String, Int>()
 
     @Synchronized
     fun state(key: String): State = when {
@@ -131,16 +134,27 @@ class SelfTestSupport(private val now: () -> Long = { System.currentTimeMillis()
     @Synchronized
     fun yes(key: String): Boolean {
         noUntil.remove(key)
+        strikes.remove(key)
         return yes.add(key)
     }
 
-    /** The server answers, but not the self-test. True when that is news. */
+    /** The server answered, but not the self-test. True when this makes it a "no" (news for the log). */
     @Synchronized
     fun no(key: String): Boolean {
-        val news = key in yes || (noUntil[key] ?: 0L) <= now()
+        if ((noUntil[key] ?: 0L) > now()) return false
+        val count = (strikes[key] ?: 0) + 1
+        if (count < STRIKES) {
+            strikes[key] = count
+            return false
+        }
+        strikes.remove(key)
         yes.remove(key)
         noUntil[key] = now() + SelfTest.RETRY_UNSUPPORTED_MS
-        return news
+        return true
+    }
+
+    companion object {
+        const val STRIKES = 2
     }
 }
 
