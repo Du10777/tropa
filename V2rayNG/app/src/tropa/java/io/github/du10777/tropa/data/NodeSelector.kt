@@ -5,13 +5,16 @@ package io.github.du10777.tropa.data
  *
  * - The active server is dead after [failThreshold] failed checks in a row: switch at once to
  *   the best server that answered its last check.
- * - Another server is "noticeably better" when its median latency is at most [betterRatio] of the
+ * - Another server is "noticeably better" when its median time is at most [betterRatio] of the
  *   active one and at least [betterMinMs] lower, [betterRounds] evaluations in a row.
  *
- * Each server keeps a short history of its checks instead of only the last one: the median latency
- * and the share of answered checks are taken over a sliding window, newest samples bounded both by
- * their count ([maxSamples]) and by their age ([windowMs], a week), so recent measurements decide
- * and a server idle for a week starts fresh. The clock is injected so the window is testable.
+ * The time compared is the time to fetch the 128 KB of the self-test from the server (latency and
+ * speed in one number) when every measured server answers the self-test, otherwise the latency:
+ * like is compared with like. Each server keeps a short history of its checks instead of only the
+ * last one: the medians and the share of answered checks are taken over a sliding window, newest
+ * samples bounded both by their count ([maxSamples]) and by their age ([windowMs], a week), so
+ * recent measurements decide and a server idle for a week starts fresh. The clock is injected so
+ * the window is testable.
  */
 class NodeSelector(
     private var failThreshold: Int = CheckSettings.DEFAULTS.failThreshold,
@@ -39,7 +42,8 @@ class NodeSelector(
 
     enum class Reason { ACTIVE_DEAD, BETTER }
 
-    private class Sample(val at: Long, val latencyMs: Long)
+    /** [fetchMs]: the time to fetch the self-test, null for a classic check (latency only). */
+    private class Sample(val at: Long, val latencyMs: Long, val fetchMs: Long?)
     private class Outcome(val at: Long, val ok: Boolean)
 
     inner class Stats {
@@ -53,14 +57,36 @@ class NodeSelector(
         /** Rounds in a row this server looked noticeably better than the active one (used by [evaluate]). */
         var betterStreak = 0
 
+        /** The last speed checks of this server (download, upload) and the user's traffic seen through it, kbit/s. */
+        var speedKbps: Long? = null
+        var uploadKbps: Long? = null
+        var trafficKbps: Long? = null
+
+        /** The last check went through the self-test of the node (null before any check). */
+        var selftest: Boolean? = null
+
         val alive: Boolean get() = checks > 0 && consecutiveFails == 0
         val dead: Boolean get() = consecutiveFails > 0
 
+        /** Median latency (until the first byte of the answer). */
         fun median(): Long? {
             prune()
             if (samples.isEmpty()) return null
             val sorted = samples.map { it.latencyMs }.sorted()
             return sorted[sorted.size / 2]
+        }
+
+        /** Median time to fetch the self-test, over the samples that have it. */
+        fun fetchMedian(): Long? {
+            prune()
+            val sorted = samples.mapNotNull { it.fetchMs }.sorted()
+            return if (sorted.isEmpty()) null else sorted[sorted.size / 2]
+        }
+
+        /** The newest sample is a self-test one (the server is compared by fetch time). */
+        internal fun measuredByFetch(): Boolean? {
+            prune()
+            return samples.lastOrNull()?.let { it.fetchMs != null }
         }
 
         /** Share of answered checks in the window (1.0 with none yet: an untried server is not punished). */
@@ -69,13 +95,14 @@ class NodeSelector(
             return if (outcomes.isEmpty()) 1.0 else outcomes.count { it.ok }.toDouble() / outcomes.size
         }
 
-        internal fun record(ok: Boolean, latencyMs: Long?) {
+        /** A check: answered or not; an answer without a time (the user's traffic flows through) counts as alive. */
+        internal fun record(ok: Boolean, latencyMs: Long?, fetchMs: Long?) {
             checks++
             val t = now()
             outcomes.addLast(Outcome(t, ok))
-            if (ok && latencyMs != null) {
+            if (ok) {
                 consecutiveFails = 0
-                samples.addLast(Sample(t, latencyMs))
+                if (latencyMs != null) samples.addLast(Sample(t, latencyMs, fetchMs))
             } else {
                 consecutiveFails++
             }
@@ -114,37 +141,53 @@ class NodeSelector(
     fun stats(tag: String): Stats? = stats[tag]
 
     @Synchronized
-    fun record(tag: String, ok: Boolean, latencyMs: Long?) {
-        stats.getOrPut(tag) { Stats() }.record(ok, latencyMs)
+    fun record(tag: String, ok: Boolean, latencyMs: Long?, fetchMs: Long? = null) {
+        stats.getOrPut(tag) { Stats() }.record(ok, latencyMs, fetchMs)
     }
+
+    /** Compared by fetch time only when every server with measurements was measured by the self-test. */
+    private fun byFetch(): Boolean {
+        val modes = stats.values.mapNotNull { it.measuredByFetch() }
+        return modes.isNotEmpty() && modes.all { it }
+    }
+
+    /** The time a server is ranked by (see the class comment), null without measurements. */
+    private fun rank(s: Stats, fetch: Boolean): Long? = if (fetch) s.fetchMedian() else s.median()
+
+    /** The time a server is ranked by right now, for the log and the details. */
+    @Synchronized
+    fun rankMs(tag: String): Long? = stats[tag]?.let { rank(it, byFetch()) }
 
     @Synchronized
     fun isActiveDead(active: String): Boolean = (stats[active]?.consecutiveFails ?: 0) >= failThreshold
 
-    /** Best server that answered its last check: lowest median latency, ties broken by reliability. */
+    /** Best server that answered its last check: lowest median time, ties broken by reliability. */
     @Synchronized
-    fun bestAlive(except: String? = null): String? =
-        stats.filter { (tag, s) -> tag != except && s.alive }
+    fun bestAlive(except: String? = null): String? {
+        val fetch = byFetch()
+        return stats.filter { (tag, s) -> tag != except && s.alive }
             .minWithOrNull(
-                compareBy<Map.Entry<String, Stats>> { it.value.median() ?: Long.MAX_VALUE }
+                compareBy<Map.Entry<String, Stats>> { rank(it.value, fetch) ?: Long.MAX_VALUE }
                     .thenByDescending { it.value.reliability() },
             )
             ?.key
+    }
 
     @Synchronized
     fun evaluate(active: String): Decision {
         if (isActiveDead(active)) {
             return bestAlive(except = active)?.let { Decision.SwitchTo(it, Reason.ACTIVE_DEAD) } ?: Decision.AllDead
         }
-        val activeMedian = stats[active]?.median() ?: return Decision.Keep
+        val fetch = byFetch()
+        val activeMedian = stats[active]?.let { rank(it, fetch) } ?: return Decision.Keep
         var winner: String? = null
         stats.forEach { (tag, s) ->
             if (tag == active) return@forEach
-            val median = s.median()
+            val median = rank(s, fetch)
             val better = s.alive && median != null &&
                 median <= activeMedian * betterRatio && activeMedian - median >= betterMinMs
             s.betterStreak = if (better) s.betterStreak + 1 else 0
-            if (s.betterStreak >= betterRounds && (winner == null || median!! < stats[winner]!!.median()!!)) winner = tag
+            if (s.betterStreak >= betterRounds && (winner == null || median!! < rank(stats[winner]!!, fetch)!!)) winner = tag
         }
         return winner?.let {
             stats.values.forEach { s -> s.betterStreak = 0 }

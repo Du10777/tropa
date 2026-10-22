@@ -248,9 +248,18 @@ class EnergyBudget(
         const val MAX_UAH_PER_FETCH = 2000.0
         private const val ALPHA = 0.3
 
-        /** Requests an hour the scheduled checks of [mode] make at the seed intervals of [values] with [servers] servers. */
-        fun plannedFetchesPerHour(mode: ScreenMode, values: CheckValues, servers: Int): Double {
-            val perCheck = values.latencyUrls.size.coerceAtLeast(1)
+        /**
+         * Requests an hour the scheduled checks of [mode] make at the seed intervals of [values] with
+         * [servers] servers; one check makes [requestsPerCheck] requests (one for the self-test of the
+         * node, every latency address for a classic check).
+         */
+        fun plannedFetchesPerHour(
+            mode: ScreenMode,
+            values: CheckValues,
+            servers: Int,
+            requestsPerCheck: Int = values.latencyUrls.size,
+        ): Double {
+            val perCheck = requestsPerCheck.coerceAtLeast(1)
             return when (mode) {
                 ScreenMode.OFF -> 3600.0 / values.screenOffIntervalSec * perCheck
                 ScreenMode.ON -> 3600.0 / values.activeIntervalSec * perCheck +

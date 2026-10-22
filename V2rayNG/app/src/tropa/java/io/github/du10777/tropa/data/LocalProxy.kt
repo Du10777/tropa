@@ -79,8 +79,9 @@ object LocalProxy {
     fun token(length: Int): String = buildString { repeat(length) { append(ALPHABET[random.nextInt(ALPHABET.length)]) } }
 
     /**
-     * The config the core starts with: local inbounds replaced as described above, and in roaming
-     * without the user's consent everything blocked (see [Roaming]).
+     * The config the core starts with: local inbounds replaced as described above, the traffic
+     * counters per server on (see [TrafficWatch]), and in roaming without the user's consent
+     * everything blocked (see [Roaming]).
      */
     fun patchConfig(config: String): String {
         val user = SettingsManager.getSocksUsername() ?: return config
@@ -108,6 +109,8 @@ object LocalProxy {
         if (user != null) {
             inbounds.add(inbound(USER_TAG, user.port, user.user, user.pass, sniffing.deepCopy(), level))
         }
+        // The watchdog reads the bytes per server (the user's traffic means the server is alive).
+        TrafficWatch.enableStats(root)
         return root.toString()
     }
 

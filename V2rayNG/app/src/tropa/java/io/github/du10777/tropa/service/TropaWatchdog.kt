@@ -36,10 +36,17 @@ import io.github.du10777.tropa.data.NodePlan
 import io.github.du10777.tropa.data.NodePlanner
 import io.github.du10777.tropa.data.NodeSelector
 import io.github.du10777.tropa.data.ProblemReports
+import io.github.du10777.tropa.data.NodeCounter
 import io.github.du10777.tropa.data.Roaming
 import io.github.du10777.tropa.data.ScreenMode
+import io.github.du10777.tropa.data.SelfTest
+import io.github.du10777.tropa.data.SelfTestResult
+import io.github.du10777.tropa.data.SelfTestSupport
+import io.github.du10777.tropa.data.SpeedResult
 import io.github.du10777.tropa.data.SubscriptionRefresher
+import io.github.du10777.tropa.data.TrafficWatch
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -134,11 +141,14 @@ object TropaWatchdog {
     /** A problem report is saved once an outage lasts this many reconnect attempts. */
     private const val REPORT_AFTER_ATTEMPTS = 3
 
-    /** Servers answering within this time after the first one are compared, the best one wins. */
-    private const val FIRST_ANSWER_WINDOW_MS = 1_000L
+    /**
+     * With the screen on, the core's counters are looked at this often between the checks: when
+     * most new connections through the current server fail, it is checked at once.
+     */
+    private const val COUNTER_POLL_MS = 5_000L
 
-    /** After connecting, the remaining servers get this long to answer, then count as down for now. */
-    private const val BACKGROUND_ANSWER_MS = 3_000L
+    /** Failing connections bring the check of the current server forward at most this often. */
+    private const val EARLY_CHECK_MS = 30_000L
 
     /** While connected, a server check with the same outcome as before is logged once in this time. */
     private const val QUIET_LOG_MS = 10 * 60_000L
@@ -334,6 +344,16 @@ object TropaWatchdog {
         val error: String? = null,
     )
 
+    /** One check of a server: answered or not, its times, and whether the self-test of its node answered. */
+    private data class Check(
+        val ok: Boolean,
+        /** Until the first byte of the answer. */
+        val latencyMs: Long? = null,
+        /** The time to fetch the 128 KB of the self-test (self-test checks only). */
+        val fetchMs: Long? = null,
+        val selftest: Boolean = false,
+    )
+
     /** One watch session: from the core start until it stops. */
     private class Session(private val context: Context, private val scope: CoroutineScope) {
         private val gson = Gson()
@@ -379,6 +399,20 @@ object TropaWatchdog {
 
         /** The budget factor written to the log last, per screen state (verbose level). */
         private val loggedScale = HashMap<ScreenMode, Double>()
+
+        /** Which servers answer the self-test of their node (by server, for the session). */
+        private val support = SelfTestSupport()
+
+        /** The core's own counters per server: traffic of the user and failed connections. */
+        private val traffic = TrafficWatch()
+
+        /** The speed of the current server is measured at its next check (it just became current). */
+        private var speedDue = false
+        private var lastActiveCheckAt = 0L
+        private var lastFailingNoteAt = 0L
+
+        /** Server choices of the background end of the connect and of the watch rounds do not interleave. */
+        private val steer = Any()
 
         /** Last outcome and last written check of each server, to keep steady periods short in the log. */
         private val lastOutcome = ConcurrentHashMap<String, Boolean>()
@@ -484,6 +518,9 @@ object TropaWatchdog {
             activeTag = null
             lastOthersAt = 0L
             lastThroughputAt = 0L
+            speedDue = false
+            // The first look also starts counting the connections of this core (TropaNodeCounters).
+            traffic.reset(counters(), System.currentTimeMillis())
             if (ConnectionLog.level >= LogLevel.VERBOSE) {
                 val names = plan.nodes.joinToString(", ") { it.name.ifEmpty { it.tag.ifEmpty { "?" } } }
                 record(ProbeEvent(System.currentTimeMillis(), "servers", "", null, "", ok = true, detail = names + (if (plan.balancerTag != null) " · balancer" else "")))
@@ -615,7 +652,7 @@ object TropaWatchdog {
                 return
             }
             val candidate = fresh.nodes.firstOrNull()?.let { addToCore(it, emptyMap()) }
-            if (candidate == null || !probeLatency(candidate.tag).ok || !throughputOk(candidate.tag)) {
+            if (candidate == null || !confirmed(candidate.tag, checkServer(candidate.tag))) {
                 record(subscriptionEvent("new server does not answer: staying on the current one"))
                 return
             }
@@ -674,7 +711,8 @@ object TropaWatchdog {
         private fun moveOff(gone: String) {
             if (activeTag == gone) {
                 val next = selector.bestAlive(except = gone) ?: return
-                if (!throughputOk(next)) {
+                // A server checked by the self-test got its 128 KB already; a classic one downloads now.
+                if (selector.stats(next)?.selftest != true && !throughputOk(next)) {
                     selector.record(next, ok = false, latencyMs = null)
                     return
                 }
@@ -728,42 +766,31 @@ object TropaWatchdog {
         }.onFailure { LogUtil.e(TAG, "cannot read the core log", it) }.getOrNull()
 
         /**
-         * Checks all servers at once and connects through the first one that answers: servers that
-         * answer within [FIRST_ANSWER_WINDOW_MS] of it are compared and the fastest wins, and the
-         * winner must also pass the download test. The rest keep being checked in the background
-         * for [BACKGROUND_ANSWER_MS] more, so the details screen and failover see them too.
+         * Checks all servers at once, one request each, and connects through the first one that
+         * proves alive (at least 64 KB of the self-test in 5 s; a classic server also has to pass
+         * the download check). The others keep their full time in the background; when all have
+         * answered, the best of the live ones takes new connections (open ones stay).
          */
         private suspend fun establish(): Boolean {
             val tags = plan.nodes.map { it.tag }
-            val answers = Channel<Pair<String, ProbeResult>>(Channel.UNLIMITED)
-            val probes = tags.associateWith { tag -> scope.async { probeLatency(tag).also { answers.trySend(tag to it) } } }
-            val answered = LinkedHashMap<String, ProbeResult>()
-            var firstOkAt = 0L
-            while (answered.size < tags.size) {
-                val waitMs = if (firstOkAt == 0L) Long.MAX_VALUE else firstOkAt + FIRST_ANSWER_WINDOW_MS - System.currentTimeMillis()
-                if (waitMs <= 0) break
-                val (tag, result) = withTimeoutOrNull(waitMs) { answers.receive() } ?: break
-                answered[tag] = result
-                selector.record(tag, result.ok, result.latencyMs.takeIf { result.ok })
-                if (result.ok && firstOkAt == 0L) firstOkAt = System.currentTimeMillis()
-            }
-
-            val pending = probes.filterKeys { it !in answered }
-            val winner = answered.filterValues { it.ok }.entries.sortedBy { it.value.latencyMs }.map { it.key }
-                .firstOrNull { tag -> passesDownload(tag) }
-            if (winner != null) {
-                if (pending.isNotEmpty()) scope.launch { finishInBackground(pending) }
-                return true
-            }
-
-            // Nobody in the window passed: give the late ones their full time, then try them.
-            pending.forEach { (tag, probe) ->
-                val result = probe.await()
-                selector.record(tag, result.ok, result.latencyMs.takeIf { result.ok })
-                if (result.ok && passesDownload(tag)) return true
+            val answers = Channel<Pair<String, Check>>(Channel.UNLIMITED)
+            val probes = tags.associateWith { tag -> scope.async { checkServer(tag).also { answers.trySend(tag to it) } } }
+            repeat(tags.size) {
+                val (tag, check) = answers.receive()
+                if (confirmed(tag, check)) {
+                    select(tag)
+                    lastThroughputAt = System.currentTimeMillis()
+                    lastActiveCheckAt = lastThroughputAt
+                    val pending = probes.filterValues { !it.isCompleted }
+                    if (pending.isNotEmpty()) scope.launch { finishInBackground(pending) }
+                    return true
+                }
             }
             return false
         }
+
+        /** A live server that may carry traffic: the self-test proved it, a classic one passes the download check. */
+        private fun confirmed(tag: String, check: Check): Boolean = check.ok && (check.selftest || passesDownload(tag))
 
         private fun passesDownload(tag: String): Boolean {
             select(tag)
@@ -775,25 +802,33 @@ object TropaWatchdog {
             return false
         }
 
-        private suspend fun finishInBackground(pending: Map<String, kotlinx.coroutines.Deferred<ProbeResult>>) {
-            val deadline = System.currentTimeMillis() + BACKGROUND_ANSWER_MS
-            pending.forEach { (tag, probe) ->
-                val result = withTimeoutOrNull((deadline - System.currentTimeMillis()).coerceAtLeast(1)) { probe.await() }
-                selector.record(tag, result?.ok == true, result?.latencyMs?.takeIf { result.ok })
+        /** The servers that answer later still count: once all are in, the best live one takes over (no history yet to protect). */
+        private suspend fun finishInBackground(pending: Map<String, Deferred<Check>>) {
+            pending.values.forEach { runCatching { it.await() } }
+            if (phase != WatchPhase.CONNECTED) return
+            synchronized(steer) {
+                val active = activeTag ?: return
+                val best = selector.bestAlive() ?: return@synchronized
+                val bestMs = selector.rankMs(best) ?: return@synchronized
+                if (best != active && bestMs < (selector.rankMs(active) ?: Long.MAX_VALUE)) switchTo(best, "faster")
             }
-            if (phase == WatchPhase.CONNECTED) publish(WatchPhase.CONNECTED)
+            publish(WatchPhase.CONNECTED)
         }
 
         /**
          * Watches the active server while things work. Returns true when the checks pause or stop
          * (turned off, weak network, roaming), false when every server is dead.
+         *
+         * While the user's traffic flows through the current server (the core's counters), it is
+         * alive and needs no test request; test requests would only compete with that traffic, so
+         * the other servers and the speed wait too (the others at most up to their longest interval).
          */
         private suspend fun monitor(): Boolean {
             // Battery measurements cover steady watching only: an outage or a pause before is not comparable.
             energy.dropWindow()
             var nextDelay = intervalMs()
             while (currentCoroutineContext().isActive && CheckSettings.enabled) {
-                val woken = waitForWake(nextDelay)
+                val woken = waitBetweenChecks(nextDelay)
                 refreshSettings()
                 val cell = cellular()
                 if (!CheckSettings.enabled || Roaming.mustBlock(cell) || pauseReasonOf(cell) != null) return true
@@ -806,16 +841,37 @@ object TropaWatchdog {
                     nextDelay = (energy.quietUntil() - System.currentTimeMillis()).coerceIn(1_000L, EnergyBudget.QUIET_MS)
                     continue
                 }
+                val now = System.currentTimeMillis()
+                val flow = traffic.look(counters(), now)[tag]
+                flow?.kbps?.let { kbps -> selector.stats(tag)?.trafficKbps = kbps }
+                if (flow?.failing == true) noteFailing(tag, flow)
+                val carries = screenOn && flow?.carries == true
                 val othersDue = plan.isBalanced && screenOn &&
-                    System.currentTimeMillis() - lastOthersAt >= budgetedMs(CheckKind.OTHERS, cfg.othersIntervalSec)
+                    now - lastOthersAt >= budgetedMs(CheckKind.OTHERS, cfg.othersIntervalSec) &&
+                    (!carries || now - lastOthersAt >= CheckKind.OTHERS.corridor.maxSec * 1000L)
+                if (carries && !othersDue) {
+                    // The user's data comes through the current server: it is alive.
+                    selector.record(tag, ok = true, latencyMs = null)
+                    activeHealthy = true
+                    checkedAt = now
+                    lastActiveCheckAt = now
+                    if (ConnectionLog.level == LogLevel.DEBUG) {
+                        record(ProbeEvent(now, "flow", serverName(tag), null, "", ok = true, detail = flowDetail(flow!!)))
+                    }
+                    if (!steerAfter(tag)) return false
+                    nextDelay = intervalMs()
+                    logScale()
+                    continue
+                }
+                val bytes = if (screenOn) SelfTest.PROBE_BYTES else SelfTest.ALIVE_BYTES
                 // All servers are checked at the same time, the active one included.
                 val tags = if (othersDue) plan.nodes.map { it.tag } else listOf(tag)
-                var results = probeAll(tags)
-                var result = results.getValue(tag)
+                val result = probeAll(tags, bytes).getValue(tag)
+                lastActiveCheckAt = System.currentTimeMillis()
                 if (othersDue) lastOthersAt = System.currentTimeMillis()
                 // A failed check of the active server needs fresh data about the others to fail over.
                 if (!result.ok && plan.isBalanced && !othersDue) {
-                    results = probeAll(plan.nodes.map { it.tag }.filter { it != tag })
+                    probeAll(plan.nodes.map { it.tag }.filter { it != tag }, bytes)
                     lastOthersAt = System.currentTimeMillis()
                 }
                 activeHealthy = result.ok
@@ -823,20 +879,15 @@ object TropaWatchdog {
                     lastLatency = result.latencyMs
                     checkedAt = System.currentTimeMillis()
                 }
-                val now = System.currentTimeMillis()
-                if (screenOn && result.ok && now - lastThroughputAt >= budgetedMs(CheckKind.SPEED, cfg.downloadIntervalSec)) {
-                    if (!throughputOk(tag)) selector.record(tag, ok = false, latencyMs = null)
-                    lastThroughputAt = now
+                val after = System.currentTimeMillis()
+                val speedAt = budgetedMs(CheckKind.SPEED, cfg.downloadIntervalSec)
+                if (screenOn && result.ok && !carries && (speedDue || after - lastThroughputAt >= speedAt)) {
+                    if (result.selftest) measureSpeed(tag)
+                    else if (!throughputOk(tag)) selector.record(tag, ok = false, latencyMs = null)
+                    lastThroughputAt = after
+                    speedDue = false
                 }
-                when (val decision = selector.evaluate(tag)) {
-                    NodeSelector.Decision.Keep -> publish(WatchPhase.CONNECTED)
-                    is NodeSelector.Decision.SwitchTo -> switchTo(
-                        decision.tag,
-                        if (decision.reason == NodeSelector.Reason.BETTER) "faster" else "previous one is down",
-                    )
-
-                    NodeSelector.Decision.AllDead -> return false
-                }
+                if (!steerAfter(tag)) return false
                 leaving?.let { gone ->
                     moveOff(gone)
                     publish(WatchPhase.CONNECTED)
@@ -846,6 +897,60 @@ object TropaWatchdog {
             }
             return true
         }
+
+        /** Applies the selector's decision for the current server; false when every server is dead. */
+        private fun steerAfter(tag: String): Boolean {
+            synchronized(steer) {
+                if (activeTag != tag) return true
+                when (val decision = selector.evaluate(tag)) {
+                    NodeSelector.Decision.Keep -> publish(WatchPhase.CONNECTED)
+                    is NodeSelector.Decision.SwitchTo -> switchTo(
+                        decision.tag,
+                        if (decision.reason == NodeSelector.Reason.BETTER) "faster" else "previous one is down",
+                    )
+
+                    NodeSelector.Decision.AllDead -> return false
+                }
+            }
+            return true
+        }
+
+        /**
+         * Waits for the next check. With the screen on, the core's counters are looked at every few
+         * seconds meanwhile: when most new connections through the current server fail, it is
+         * checked right away (at most every [EARLY_CHECK_MS]). True when woken that way or by a signal.
+         */
+        private suspend fun waitBetweenChecks(totalMs: Long): Boolean {
+            val until = System.currentTimeMillis() + totalMs
+            while (true) {
+                val left = until - System.currentTimeMillis()
+                if (left <= 0) return false
+                if (!screenOn) return waitForWake(left)
+                if (waitForWake(minOf(left, COUNTER_POLL_MS))) return true
+                val tag = activeTag ?: continue
+                val now = System.currentTimeMillis()
+                if (now - lastActiveCheckAt < EARLY_CHECK_MS) continue
+                if (traffic.peek(counters(), now)[tag]?.failing == true) return true
+            }
+        }
+
+        /** Connections through the current server keep failing (verbose level; at most every 10 minutes). */
+        private fun noteFailing(tag: String, flow: TrafficWatch.Delta) {
+            val now = System.currentTimeMillis()
+            if (ConnectionLog.level < LogLevel.VERBOSE || now - lastFailingNoteAt < QUIET_LOG_MS) return
+            lastFailingNoteAt = now
+            record(ProbeEvent(now, "flow", serverName(tag), null, "", ok = false, detail = flowDetail(flow)))
+        }
+
+        private fun flowDetail(flow: TrafficWatch.Delta): String = buildList {
+            add("${flow.down / 1024} KB in ${flow.ms / 1000} s")
+            flow.kbps?.let { add(SpeedResult.label(it)) }
+            add("connections ${flow.conns}, failed ${flow.fails}")
+        }.joinToString(" · ")
+
+        /** The core's counters per server (an empty map if it cannot tell). */
+        private fun counters(): Map<String, NodeCounter> =
+            runCatching { TrafficWatch.parse(CoreServiceManager.coreController.tropaNodeCounters()) }.getOrDefault(emptyMap())
 
         /** The interval of the active server check after the battery budget, ms. */
         private fun intervalMs(): Long {
@@ -859,7 +964,11 @@ object TropaWatchdog {
         private fun budgetedMs(kind: CheckKind, seedSec: Int): Long =
             energy.intervalSec(kind, seedSec, ScreenMode.ON, battery, planned(ScreenMode.ON)) * 1000L
 
-        private fun planned(mode: ScreenMode): Double = EnergyBudget.plannedFetchesPerHour(mode, cfg, plan.nodes.size)
+        private fun planned(mode: ScreenMode): Double {
+            // A self-test check is one request; a classic one asks every latency address.
+            val perCheck = if (activeTag?.let { selector.stats(it)?.selftest } == true) 1 else cfg.latencyUrls.size
+            return EnergyBudget.plannedFetchesPerHour(mode, cfg, plan.nodes.size, perCheck)
+        }
 
         private fun screenMode(): ScreenMode = if (screenOn) ScreenMode.ON else ScreenMode.OFF
 
@@ -912,10 +1021,11 @@ object TropaWatchdog {
             LogUtil.i(TAG, "switching new connections to $tag ($reason)")
             record(event(tag, "switch", "", ok = true, ProbeResult(ok = true), error = null, detail = reason))
             select(tag)
+            speedDue = true
             publish(WatchPhase.CONNECTED)
         }
 
-        private fun select(tag: String) {
+        private fun select(tag: String) = synchronized(steer) {
             activeTag = tag
             if (plan.balancerTag != null) override(tag)
         }
@@ -956,19 +1066,113 @@ object TropaWatchdog {
             return true
         }
 
-        /** Checks the servers in parallel and records the results. */
-        private suspend fun probeAll(tags: List<String>): Map<String, ProbeResult> = coroutineScope {
-            tags.map { tag -> async { tag to probeLatency(tag) } }.awaitAll().onEach { (tag, result) ->
-                selector.record(tag, result.ok, result.latencyMs.takeIf { result.ok })
-            }.toMap()
+        /** Checks the servers in parallel; the results are recorded for the server choice. */
+        private suspend fun probeAll(tags: List<String>, bytes: Long = SelfTest.PROBE_BYTES): Map<String, Check> = coroutineScope {
+            tags.map { tag -> async { tag to checkServer(tag, bytes) } }.awaitAll().toMap()
         }
+
+        /**
+         * Checks one server the way its node supports: one request to the self-test of the node
+         * (the first hop only), or the classic latency check. A self-test failure that is quick
+         * (or brings other bytes) may mean a node without the self-test: the classic check then
+         * tells, and a server that answers it is checked the classic way for some hours.
+         */
+        private suspend fun checkServer(tag: String, bytes: Long = SelfTest.PROBE_BYTES): Check {
+            val key = plan.nodes.firstOrNull { it.tag == tag }?.fingerprint?.takeIf { it.isNotEmpty() } ?: tag
+            val check = if (support.state(key) == SelfTestSupport.State.NO) {
+                classic(tag, note = null)
+            } else {
+                val result = selfTest(tag, bytes)
+                when {
+                    result.alive -> {
+                        if (support.yes(key)) noteMode(tag, selftest = true)
+                        recordCheck(tag, selfTestEvent(tag, result))
+                        Check(ok = true, latencyMs = result.latencyMs, fetchMs = result.fetchMs(), selftest = true)
+                    }
+
+                    result.maybeUnsupported -> {
+                        val fallback = classic(tag, note = "self-test: " + shortError(result.error ?: "no answer"))
+                        if (fallback.ok && support.no(key)) noteMode(tag, selftest = false)
+                        fallback
+                    }
+
+                    else -> {
+                        recordCheck(tag, selfTestEvent(tag, result))
+                        Check(ok = false)
+                    }
+                }
+            }
+            selector.record(tag, check.ok, check.latencyMs, check.fetchMs)
+            if (check.ok) selector.stats(tag)?.selftest = check.selftest
+            return check
+        }
+
+        private suspend fun classic(tag: String, note: String?): Check {
+            val result = probeLatency(tag, note)
+            return Check(ok = result.ok, latencyMs = result.latencyMs.takeIf { result.ok })
+        }
+
+        private fun selfTest(tag: String, bytes: Long): SelfTestResult {
+            energy.countFetch()
+            val result = runCatching {
+                SelfTestResult.parse(CoreServiceManager.coreController.tropaSelfTest(tag, SelfTest.url(bytes), SelfTest.TIMEOUT_MS, bytes))
+            }.getOrElse { SelfTestResult(error = it.message ?: it.javaClass.simpleName) }
+            traffic.ownBytes(tag, result.bytes)
+            return result
+        }
+
+        private fun selfTestEvent(tag: String, result: SelfTestResult): ProbeEvent {
+            val ok = result.alive
+            val probe = ProbeResult(ok = ok, status = result.status, latencyMs = result.fetchMs() ?: result.totalMs, totalMs = result.totalMs, bytes = result.bytes)
+            val error = if (ok) null else shortError(result.error ?: "no answer") + if (result.bytes > 0) " (${result.bytes / 1024} KB came)" else ""
+            val detail = if (ConnectionLog.level >= LogLevel.VERBOSE && result.status > 0) "first byte ${result.latencyMs} ms" else null
+            return event(tag, "selftest", "", ok, probe, error = error, detail = detail)
+        }
+
+        /** The time-boxed speed of the current server (and the upload, if the user asked for it); never decides alive or dead. */
+        private fun measureSpeed(tag: String) {
+            val stats = selector.stats(tag)
+            val down = speedTest(tag, upload = false)
+            down.kbps?.let { stats?.speedKbps = it }
+            recordResult(speedEvent(tag, "speed", down))
+            if (CheckSettings.checkUpload && down.ok) {
+                val up = speedTest(tag, upload = true)
+                up.kbps?.let { stats?.uploadKbps = it }
+                recordResult(speedEvent(tag, "upload", up))
+            }
+        }
+
+        private fun speedTest(tag: String, upload: Boolean): SpeedResult {
+            energy.countFetch()
+            val url = if (upload) SelfTest.UPLOAD_URL else SelfTest.url(SelfTest.SPEED_BYTES)
+            val result = runCatching {
+                SpeedResult.parse(CoreServiceManager.coreController.tropaSpeedTest(tag, url, SelfTest.SPEED_MS, SelfTest.SPEED_BYTES, upload))
+            }.getOrElse { SpeedResult(error = it.message ?: it.javaClass.simpleName) }
+            if (!upload) traffic.ownBytes(tag, result.bytes)
+            return result
+        }
+
+        private fun speedEvent(tag: String, kind: String, result: SpeedResult): ProbeEvent {
+            val probe = ProbeResult(ok = result.ok, latencyMs = result.ms, totalMs = result.ms, bytes = result.bytes)
+            return event(tag, kind, "", result.ok, probe, error = result.error?.let(::shortError), detail = result.kbps?.let { SpeedResult.label(it) })
+        }
+
+        /** How a server is checked changed: by the self-test of its node, or the classic way (verbose level). */
+        private fun noteMode(tag: String, selftest: Boolean) {
+            if (ConnectionLog.level < LogLevel.VERBOSE) return
+            val detail = if (selftest) "the node answers the self-test: one request per check, to the node itself"
+            else "no self-test on this node: checked through the check addresses"
+            record(ProbeEvent(System.currentTimeMillis(), "mode", serverName(tag), null, "", ok = true, detail = detail))
+        }
+
+        private fun serverName(tag: String): String = plan.nodes.firstOrNull { it.tag == tag }?.name?.takeIf { it.isNotEmpty() } ?: tag
 
         /**
          * A server is alive when any of the latency addresses answers through it. All addresses are
          * asked at once and the first success counts; the others finish in the background.
          * The log gets one line per server: the address that answered, or the errors of all of them.
          */
-        private suspend fun probeLatency(tag: String): ProbeResult {
+        private suspend fun probeLatency(tag: String, note: String? = null): ProbeResult {
             val urls = cfg.latencyUrls
             val timeoutMs = cfg.latencyTimeoutSec * 1000L
             if (urls.isEmpty()) return ProbeResult(error = "no addresses")
@@ -988,12 +1192,12 @@ object TropaWatchdog {
                 val (url, result) = answers.receive()
                 last = result
                 if (result.ok) {
-                    recordCheck(tag, event(tag, "latency", url, ok = true, result), write = !perAddress)
+                    recordCheck(tag, event(tag, "latency", url, ok = true, result, detail = note), write = !perAddress)
                     return result
                 }
                 errors[url] = result.error ?: "error"
             }
-            val details = errors.entries.joinToString("; ") { (url, error) -> "${hostOf(url)}: ${shortError(error)}" }
+            val details = (errors.entries.map { (url, error) -> "${hostOf(url)}: ${shortError(error)}" } + listOfNotNull(note)).joinToString("; ")
             recordCheck(tag, event(tag, "latency", "", ok = false, last, error = details), write = !perAddress)
             return last
         }
@@ -1040,7 +1244,7 @@ object TropaWatchdog {
         private fun probe(tag: String, url: String, timeoutMs: Long, maxBytes: Long): ProbeResult = try {
             energy.countFetch()
             val json = CoreServiceManager.coreController.tropaProbe(tag, url, timeoutMs, maxBytes)
-            gson.fromJson(json, ProbeResult::class.java) ?: ProbeResult(error = "empty result")
+            (gson.fromJson(json, ProbeResult::class.java) ?: ProbeResult(error = "empty result")).also { traffic.ownBytes(tag, it.bytes) }
         } catch (e: Exception) {
             ProbeResult(error = e.message ?: e.javaClass.simpleName)
         }
@@ -1159,6 +1363,9 @@ object TropaWatchdog {
                     alive = stats?.takeIf { it.checks > 0 }?.alive,
                     latencyMs = stats?.median(),
                     active = node.tag == activeTag,
+                    speedKbps = stats?.speedKbps ?: stats?.trafficKbps,
+                    uploadKbps = stats?.uploadKbps,
+                    selftest = stats?.selftest,
                 )
             }
             return WatchState(

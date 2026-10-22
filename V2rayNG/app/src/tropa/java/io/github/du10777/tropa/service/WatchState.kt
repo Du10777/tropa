@@ -33,22 +33,32 @@ data class WatchNode(
     val tag: String,
     val name: String,
     val alive: Boolean?,
+    /** Median latency until the first byte. */
     val latencyMs: Long?,
     val active: Boolean,
+    /** The last speed check, or else the user's traffic seen through it, kbit/s. */
+    val speedKbps: Long? = null,
+    val uploadKbps: Long? = null,
+    /** Checked by the self-test of its node (null before any check). */
+    val selftest: Boolean? = null,
 )
 
 /** One entry of the connection log: a check made by the watchdog or a session event. */
 data class ProbeEvent(
     val at: Long,
     /**
-     * Checks: latency | download | direct. Session: start | stop | connected | no_server |
+     * Checks: selftest (one request to the self-test of the node: latencyMs = time for 128 KB) |
+     * latency | download | direct | speed | upload (time-boxed speed: latencyMs = measured time,
+     * detail = the speed). Session: start | stop | connected | no_server |
      * no_internet | reload | switch (detail: why) | subscription (the active one changed, detail:
      * what was done with it) | roaming (target = network MCC, ok = traffic allowed) | paused
      * (target = weak | roaming) | checks (server = connection, detail: the check parameters its
      * server sent; ok = false when its Tropa-Checks header was unusable).
      * Details: network (target = wifi | cellular | ethernet | none | other, ok = validated by
      * Android) | servers | screen_on | screen_off | core (Xray message) | energy (the battery
-     * budget: a quiet window, what it measured, how it moved the intervals).
+     * budget: a quiet window, what it measured, how it moved the intervals) | mode (a server is
+     * checked by the self-test of its node, or the classic way) | flow (the core's counters of the
+     * current server: the user's traffic, failing connections).
      */
     val kind: String,
     val server: String,

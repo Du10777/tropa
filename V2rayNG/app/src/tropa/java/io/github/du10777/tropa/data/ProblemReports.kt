@@ -190,7 +190,12 @@ object ProblemReports {
             }
             if (state != null) {
                 appendLine("phase: ${state.phase}, attempt ${state.attempt}, active: ${state.activeName}")
-                state.nodes.forEach { appendLine("node ${it.name}: alive=${it.alive} latency=${it.latencyMs} active=${it.active}") }
+                state.nodes.forEach {
+                    appendLine(
+                        "node ${it.name}: alive=${it.alive} latency=${it.latencyMs} active=${it.active} " +
+                            "selftest=${it.selftest} speedKbps=${it.speedKbps} uploadKbps=${it.uploadKbps}",
+                    )
+                }
             }
             appendLine("--- connection log (oldest first)")
             append(ConnectionLog.text(context))

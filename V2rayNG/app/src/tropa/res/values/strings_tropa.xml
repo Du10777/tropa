@@ -125,7 +125,7 @@
     <string name="tropa_checks_latency_urls">Addresses for the latency check</string>
     <string name="tropa_checks_throughput_urls">Addresses for the download check (%1$d KB or more)</string>
     <string name="tropa_checks_direct_urls">Addresses for the internet check without VPN</string>
-    <string name="tropa_checks_urls_hint">One address per line. A server counts as alive when at least one address answers.</string>
+    <string name="tropa_checks_urls_hint">Servers with a self-test are checked with one request to the server itself, without these addresses. The addresses are for the other servers: one per line, a server counts as alive when at least one address answers.</string>
     <string name="tropa_checks_reset">Restore defaults</string>
     <string name="tropa_checks_save">Save</string>
     <string name="tropa_checks_saved">Saved</string>
@@ -343,4 +343,12 @@
     <string name="tropa_energy_unmeasured">Not measured yet: the checks run at their usual intervals. Tropa measures with the screen off, it takes a few hours.</string>
     <string name="tropa_energy_measured">Measured: one check request ≈ %1$s µAh (measurements: %2$d)</string>
     <string name="tropa_log_energy">Battery budget</string>
+    <!-- Checks redesign: one check per server (the node's self-test), speed, the core's traffic -->
+    <string name="tropa_log_selftest">server check</string>
+    <string name="tropa_log_speed">speed</string>
+    <string name="tropa_log_upload">upload speed</string>
+    <string name="tropa_log_mode">Check method</string>
+    <string name="tropa_log_flow">Traffic through the server</string>
+    <string name="tropa_checks_upload">Check the upload speed too</string>
+    <string name="tropa_checks_upload_hint">The download speed check is usually enough. Turn this on if the sending speed matters too (video calls, uploading files). Doubles the test traffic.</string>
 </resources>

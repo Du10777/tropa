@@ -776,7 +776,14 @@ private fun ProfileBlock(profile: ProfileDetails, watch: WatchState?) {
                         node.transport?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                     if (live?.alive == true && live.latencyMs != null) {
-                        Text(stringResource(R.string.tropa_value_ms, live.latencyMs), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(stringResource(R.string.tropa_value_ms, live.latencyMs), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            live.speedKbps?.let { kbps ->
+                                val context = LocalContext.current
+                                val up = live.uploadKbps?.let { " ↑ " + speedText(context, it * 125) }.orEmpty()
+                                Text("↓ " + speedText(context, kbps * 125) + up, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                     if (live?.active == true) {
                         Surface(shape = CircleShape, color = TropaColors.Brand, modifier = Modifier.size(8.dp)) {}

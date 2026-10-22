@@ -124,7 +124,7 @@
     <string name="tropa_checks_latency_urls">Адреса для проверки задержки</string>
     <string name="tropa_checks_throughput_urls">Адреса для проверки скачивания (от %1$d КБ)</string>
     <string name="tropa_checks_direct_urls">Адреса для проверки интернета без VPN</string>
-    <string name="tropa_checks_urls_hint">По одному адресу на строку. Сервер считается живым, если ответил хотя бы один адрес.</string>
+    <string name="tropa_checks_urls_hint">Серверы с самопроверкой Тропа проверяет одним запросом к самому серверу, без этих адресов. Адреса — для остальных серверов: по одному на строку, сервер считается живым, если ответил хотя бы один адрес.</string>
     <string name="tropa_checks_reset">Вернуть по умолчанию</string>
     <string name="tropa_checks_save">Сохранить</string>
     <string name="tropa_checks_saved">Сохранено</string>
@@ -350,4 +350,12 @@
     <string name="tropa_energy_unmeasured">Расход ещё не измерен: проверки идут с обычными интервалами. Тропа меряет его при выключенном экране, это занимает несколько часов.</string>
     <string name="tropa_energy_measured">Измерено: один запрос проверки ≈ %1$s мкА·ч (замеров: %2$d)</string>
     <string name="tropa_log_energy">Энергобюджет</string>
+    <!-- Переработка проверок: одна проба на сервер (самопроверка ноды), скорость, трафик ядра -->
+    <string name="tropa_log_selftest">проверка сервера</string>
+    <string name="tropa_log_speed">скорость</string>
+    <string name="tropa_log_upload">скорость отдачи</string>
+    <string name="tropa_log_mode">Способ проверки</string>
+    <string name="tropa_log_flow">Трафик через сервер</string>
+    <string name="tropa_checks_upload">Проверять скорость отдачи (upload)</string>
+    <string name="tropa_checks_upload_hint">Обычно хватает проверки скорости скачивания. Включите, если важна и скорость отправки (видеозвонки, выгрузка файлов). Удваивает тест-трафик.</string>
 </resources>

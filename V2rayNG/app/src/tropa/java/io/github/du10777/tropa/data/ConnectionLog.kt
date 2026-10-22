@@ -165,7 +165,7 @@ object ConnectionLog {
                 if (e.target.isNotEmpty() && e.kind !in TARGET_IN_TITLE) append(' ').append(e.target)
                 when {
                     e.kind in SESSION_KINDS || e.kind in NOTE_KINDS -> Unit
-                    e.ok && e.kind == "download" -> append(" → OK ${e.latencyMs} ms, ${e.bytes} B")
+                    e.ok && e.kind in BYTE_KINDS -> append(" → OK ${e.latencyMs} ms, ${e.bytes} B")
                     e.ok -> append(" → OK ${e.latencyMs} ms")
                     else -> append(" → ").append(e.error ?: "error")
                 }
@@ -182,7 +182,10 @@ object ConnectionLog {
     )
 
     /** Small notes: shown as plain grey lines. */
-    val NOTE_KINDS = setOf("screen_on", "screen_off", "core", "energy")
+    val NOTE_KINDS = setOf("screen_on", "screen_off", "core", "energy", "mode", "flow")
+
+    /** Checks that move data: the result shows the bytes too. */
+    val BYTE_KINDS = setOf("download", "selftest", "speed", "upload")
 
     /** Kinds whose target is part of the title (network type, log level, why the checks pause). */
     private val TARGET_IN_TITLE = setOf("network", "level", "paused")
@@ -212,6 +215,11 @@ object ConnectionLog {
         when (kind) {
             "latency" -> R.string.tropa_log_latency
             "download" -> R.string.tropa_log_download
+            "selftest" -> R.string.tropa_log_selftest
+            "speed" -> R.string.tropa_log_speed
+            "upload" -> R.string.tropa_log_upload
+            "mode" -> R.string.tropa_log_mode
+            "flow" -> R.string.tropa_log_flow
             "direct" -> R.string.tropa_log_direct
             "start" -> R.string.tropa_log_start
             "stop" -> R.string.tropa_log_stop

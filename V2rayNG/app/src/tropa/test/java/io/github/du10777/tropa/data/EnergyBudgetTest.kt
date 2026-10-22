@@ -116,6 +116,8 @@ class EnergyBudgetTest {
         val v = CheckSettings.DEFAULTS // 3 latency addresses; 30 s, 3 min, 15 min, screen off 5 min
         assertEquals(36.0, EnergyBudget.plannedFetchesPerHour(ScreenMode.OFF, v, 3), 1e-9)
         assertEquals(360.0 + 120.0 + 4.0, EnergyBudget.plannedFetchesPerHour(ScreenMode.ON, v, 3), 1e-9)
+        // One request per check when the nodes answer the self-test.
+        assertEquals(12.0, EnergyBudget.plannedFetchesPerHour(ScreenMode.OFF, v, 3, requestsPerCheck = 1), 1e-9)
         assertEquals(364.0, EnergyBudget.plannedFetchesPerHour(ScreenMode.ON, v, 1), 1e-9)
     }
 

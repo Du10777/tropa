@@ -74,6 +74,7 @@ class TropaChecksActivity : BaseComponentActivity() {
             var download by remember { mutableStateOf(values.downloadUrls.joinToString("\n")) }
             var direct by remember { mutableStateOf(values.directUrls.joinToString("\n")) }
             var energy by remember { mutableStateOf(EnergyStore.settings()) }
+            var upload by remember { mutableStateOf(CheckSettings.checkUpload) }
             val energyModel = remember { EnergyStore.model() }
 
             fun saved() {
@@ -166,6 +167,11 @@ class TropaChecksActivity : BaseComponentActivity() {
                                 saved()
                             }) { Text(stringResource(R.string.tropa_checks_save)) }
                         }
+                        ToggleCard(R.string.tropa_checks_upload, R.string.tropa_checks_upload_hint, upload) {
+                            upload = it
+                            CheckSettings.checkUpload = it
+                            TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
+                        }
                         MoreCard(values, server)
                         EnergyCard(energy, energyModel) { changed ->
                             energy = changed
@@ -175,6 +181,29 @@ class TropaChecksActivity : BaseComponentActivity() {
                     }
                 }
             }
+        }
+    }
+}
+
+/** A setting that is on or off, with a line about what it does. */
+@Composable
+private fun ToggleCard(@StringRes title: Int, @StringRes hint: Int, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Card {
+        Row(
+            modifier = Modifier
+                .clickable { onChange(!checked) }
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onChange,
+                colors = SwitchDefaults.colors(checkedTrackColor = TropaColors.Brand, checkedThumbColor = Color.White),
+            )
         }
     }
 }

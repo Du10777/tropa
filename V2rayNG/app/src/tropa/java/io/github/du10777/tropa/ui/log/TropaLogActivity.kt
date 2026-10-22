@@ -381,7 +381,7 @@ fun LogEntry(e: ProbeEvent) {
                 Text(e.target.removePrefix("https://"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val result = when {
-                e.ok && e.kind == "download" -> stringResource(R.string.tropa_log_ok_bytes, e.latencyMs, Formatter.formatShortFileSize(context, e.bytes))
+                e.ok && e.kind in ConnectionLog.BYTE_KINDS -> stringResource(R.string.tropa_log_ok_bytes, e.latencyMs, Formatter.formatShortFileSize(context, e.bytes))
                 e.ok -> stringResource(R.string.tropa_value_ms, e.latencyMs)
                 else -> e.error.orEmpty()
             }
