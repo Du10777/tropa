@@ -220,8 +220,8 @@ object CheckSettings {
         downloadTimeoutSec = 15,
         downloadMinKb = 64,
         failThreshold = 2,
-        betterPercent = 30,
-        betterMinMs = 50,
+        betterPercent = 15,
+        betterMinMs = 15,
         betterRounds = 3,
     )
 
@@ -235,11 +235,22 @@ object CheckSettings {
     private const val DIRECT_URLS = "tropa_check_direct_urls"
     private const val USER_LAYER = "tropa_check_user_layer"
     private const val KILL_SWITCH = "tropa_kill_switch"
+    private const val CHECK_UPLOAD = "tropa_check_upload"
 
     var enabled: Boolean
         get() = MmkvManager.decodeSettingsBool(ENABLED, true)
         set(value) {
             MmkvManager.encodeSettings(ENABLED, value)
+        }
+
+    /**
+     * "Check the upload speed too": off by default. The download check is usually enough; turning
+     * this on doubles the test traffic to measure the upstream of the first hop as well.
+     */
+    var checkUpload: Boolean
+        get() = MmkvManager.decodeSettingsBool(CHECK_UPLOAD, false)
+        set(value) {
+            MmkvManager.encodeSettings(CHECK_UPLOAD, value)
         }
 
     /** What the checks run with: the user's values, then the server's of the connection, then the defaults. */

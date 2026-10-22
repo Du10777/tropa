@@ -75,7 +75,7 @@ class CheckParamsTest {
         assertEquals(CheckSettings.DEFAULTS.downloadUrls, values.downloadUrls)
         assertEquals(CheckSettings.DEFAULTS.failThreshold, values.failThreshold)
         assertEquals(CheckSettings.DEFAULTS, CheckParams().over(CheckSettings.DEFAULTS))
-        assertEquals(0.7, CheckSettings.DEFAULTS.betterRatio, 1e-9)
+        assertEquals(0.85, CheckSettings.DEFAULTS.betterRatio, 1e-9)
         assertEquals(65536L, CheckSettings.DEFAULTS.downloadMinBytes)
     }
 

@@ -164,8 +164,49 @@ class NodeSelectorTest {
     fun `small gains do not cause switching`() {
         val s = selector()
         s.record("a", true, 100)
-        s.record("b", true, 60) // 40 % faster but only 40 ms
+        s.record("b", true, 90) // 10 % faster and only 10 ms: below the 15 % / 15 ms threshold
         repeat(5) { assertEquals(NodeSelector.Decision.Keep, s.evaluate("a")) }
+    }
+
+    @Test
+    fun `a server past the 15 percent and 15 ms threshold wins after three rounds`() {
+        val s = selector()
+        s.record("a", true, 100)
+        s.record("b", true, 80) // 20 % faster and 20 ms: over the threshold
+        assertEquals(NodeSelector.Decision.Keep, s.evaluate("a"))
+        assertEquals(NodeSelector.Decision.Keep, s.evaluate("a"))
+        assertEquals(NodeSelector.Decision.SwitchTo("b", NodeSelector.Reason.BETTER), s.evaluate("a"))
+    }
+
+    @Test
+    fun `latency samples older than the window drop out, recent ones decide`() {
+        var clock = 0L
+        val s = NodeSelector(now = { clock })
+        s.reset(listOf("a"))
+        s.record("a", true, 1000) // old, slow
+        clock += 8L * 24 * 60 * 60 * 1000 // more than a week later
+        s.record("a", true, 50)
+        assertEquals(50L, s.stats("a")?.median())
+    }
+
+    @Test
+    fun `reliability is the share of answered checks in the window`() {
+        val s = selector()
+        s.record("a", true, 100)
+        s.record("a", false, null)
+        s.record("a", true, 100)
+        s.record("a", true, 100)
+        assertEquals(0.75, s.stats("a")!!.reliability(), 1e-9)
+    }
+
+    @Test
+    fun `best alive breaks latency ties by reliability`() {
+        val s = selector()
+        s.record("a", true, 100)
+        s.record("a", false, null)
+        s.record("a", true, 100) // same median as b, but flakier
+        s.record("b", true, 100)
+        assertEquals("b", s.bestAlive())
     }
 
     @Test
