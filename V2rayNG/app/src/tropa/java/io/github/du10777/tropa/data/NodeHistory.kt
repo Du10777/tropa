@@ -17,6 +17,8 @@ data class NodeHistory(
     val speedKbps: Long? = null,
     val uploadKbps: Long? = null,
     val ip: String? = null,
+    /** The node's gateway from its self-test answers (see [NodeSelector.Stats.gateway]). */
+    val gateway: String? = null,
 ) {
     data class Sample(val at: Long, val latencyMs: Long, val fetchMs: Long?)
     data class Outcome(val at: Long, val ok: Boolean)

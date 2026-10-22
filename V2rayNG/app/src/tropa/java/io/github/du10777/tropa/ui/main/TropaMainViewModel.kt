@@ -12,12 +12,14 @@ import io.github.du10777.tropa.data.Connection
 import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.LinkCandidate
 import io.github.du10777.tropa.data.LinkParser
+import io.github.du10777.tropa.data.MeteredWifi
 import io.github.du10777.tropa.data.Roaming
 import io.github.du10777.tropa.data.RoutingPreset
 import io.github.du10777.tropa.data.SubscriptionRefresher
 import io.github.du10777.tropa.data.TropaPrefs
 import io.github.du10777.tropa.service.CoreState
 import io.github.du10777.tropa.service.ServiceStateMonitor
+import io.github.du10777.tropa.service.TropaNotifier
 import io.github.du10777.tropa.service.TropaServiceEventsReceiver
 import io.github.du10777.tropa.service.WatchPhase
 import io.github.du10777.tropa.service.WatchState
@@ -59,6 +61,8 @@ data class MainUiState(
     /** Roaming stopped the traffic: the question is shown, with the mobile data per day if known. */
     val roamingAsk: Boolean = false,
     val roamingDailyBytes: Long? = null,
+    /** A metered Wi-Fi the watchdog asks about (its key): "Is this Wi-Fi unlimited?" is shown. */
+    val wifiAsk: String? = null,
 )
 
 /** A newer Tropa version offered on the main screen, and how its download goes. */
@@ -99,6 +103,9 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
     /** The roaming country the mobile data per day was looked up for. */
     private var roamingUsageFor: String? = null
 
+    /** The Wi-Fi whose question was answered or put off in this run of the screen. */
+    private var wifiDismissed: String? = null
+
     init {
         reload()
         monitor.start()
@@ -124,6 +131,7 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
                                 it.roamingAsk -> true
                                 else -> roamingMcc != roamingDismissed
                             },
+                            wifiAsk = watch?.wifiAsk?.takeIf { key -> core == CoreState.Running && key != wifiDismissed },
                         )
                     }
                     if (roamingMcc != null && state.value.roamingAsk && roamingUsageFor != roamingMcc) {
@@ -190,6 +198,21 @@ class TropaMainViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissRoaming() {
         roamingDismissed = state.value.watch?.roamingMcc
         _state.update { it.copy(roamingAsk = false) }
+    }
+
+    /** The person's answer about the Wi-Fi: kept for that network, the watchdog takes it at once. */
+    fun answerWifi(limited: Boolean) {
+        val key = state.value.wifiAsk ?: return
+        MeteredWifi.remember(key, limited)
+        TropaNotifier.cancelWifi(getApplication())
+        TropaServiceEventsReceiver.wakeWatchdog(getApplication())
+        wifiDismissed = key
+        _state.update { it.copy(wifiAsk = null) }
+    }
+
+    fun dismissWifi() {
+        wifiDismissed = state.value.wifiAsk
+        _state.update { it.copy(wifiAsk = null) }
     }
 
     fun askRoamingAgain() {

@@ -26,6 +26,12 @@ object SelfTest {
     /** ...and the server is alive when at least this much of the stream came in time (a channel that freezes after ~16 KB fails). */
     const val ALIVE_BYTES = 64 * 1024L
 
+    /**
+     * The probe on a limited Wi-Fi (see [MeteredWifi]): enough to prove the node by its stream, too
+     * small to measure the speed, so servers are then compared by the time to the first byte.
+     */
+    const val ECONOMY_BYTES = 8L * 1024
+
     const val TIMEOUT_MS = 5_000L
 
     /** The speed check moves data for this long and counts what got through. */
@@ -48,6 +54,11 @@ object SelfTest {
     const val RETRY_UNSUPPORTED_MS = 6 * 60 * 60_000L
 
     fun url(bytes: Long): String = "$BASE?bytes=$bytes"
+
+    private val IPV4 = Regex("""(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}""")
+
+    /** A dotted IPv4 address and nothing else. */
+    fun isIpv4(value: String): Boolean = IPV4.matches(value)
 }
 
 /** What the core's TropaSelfTest returns (JSON). */
@@ -59,14 +70,24 @@ data class SelfTestResult(
     val verified: Boolean = false,
     val complete: Boolean = false,
     val error: String? = null,
+    /** The node's gateway from its answer (header Tropa-Gateway); use [gatewayIp]. */
+    val gateway: String? = null,
 ) {
     /** Enough of the right stream came in time. The speed never decides this. */
-    val alive: Boolean get() = verified && bytes >= SelfTest.ALIVE_BYTES
+    val alive: Boolean get() = aliveFor(SelfTest.PROBE_BYTES)
+
+    /** Alive for a probe of [size]: 64 KB of it, or all of a smaller one (the economy probe). */
+    fun aliveFor(size: Long): Boolean = verified && bytes >= minOf(SelfTest.ALIVE_BYTES, size)
 
     val wrongContent: Boolean get() = error?.contains("unexpected content") == true
 
+    /** The gateway when it is a plain IPv4 address (the core checks it too; it ends up in a ping command). */
+    val gatewayIp: String? get() = gateway?.trim()?.takeIf { SelfTest.isIpv4(it) }
+
     /** Not the stream, or a failure so quick that the node may simply have no self-test. */
-    val maybeUnsupported: Boolean get() = !alive && (wrongContent || totalMs < SelfTest.QUICK_FAILURE_MS)
+    val maybeUnsupported: Boolean get() = maybeUnsupportedFor(SelfTest.PROBE_BYTES)
+
+    fun maybeUnsupportedFor(size: Long): Boolean = !aliveFor(size) && (wrongContent || totalMs < SelfTest.QUICK_FAILURE_MS)
 
     /**
      * Time to fetch [size] bytes: measured when the whole size came, otherwise estimated from the

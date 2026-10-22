@@ -64,7 +64,8 @@ data class ProbeEvent(
      * address (the IP a server name connects to: the DNS answer, the last proven IP, the winner) |
      * dns (session: the connection's server announced DNS inside the tunnel, or stopped; server = connection) |
      * unreachable (a server that stays down probed directly: ok = false when its address may be blocked
-     * from this network, then reported to the server).
+     * from this network, then reported to the server) |
+     * economy (session: target = on | off, the checks save traffic on a limited Wi-Fi).
      */
     val kind: String,
     val server: String,
@@ -100,6 +101,10 @@ data class WatchState(
     val roamingMcc: String? = null,
     /** What the diagnosis found (Diagnosis.Verdict name), in the NO_SERVER and NO_INTERNET phases. */
     val diagnosis: String? = null,
+    /** The checks save traffic: a limited Wi-Fi (see MeteredWifi). */
+    val economy: Boolean = false,
+    /** A metered Wi-Fi the person has not answered about (its key): the main screen asks whether it is limited. */
+    val wifiAsk: String? = null,
 )
 
 /**

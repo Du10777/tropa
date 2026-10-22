@@ -23,6 +23,7 @@ object TropaNotifier {
     private const val UPDATE_CHANNEL_ID = "tropa_updates"
     private const val UPDATE_NOTIFICATION_ID = 4202
     private const val ROAMING_NOTIFICATION_ID = 4203
+    private const val WIFI_NOTIFICATION_ID = 4204
     private const val RESTORED_TIMEOUT_MS = 10_000L
 
     fun notifyLost(context: Context) =
@@ -60,9 +61,34 @@ object TropaNotifier {
         NotificationManagerCompat.from(context).cancel(ROAMING_NOTIFICATION_ID)
     }
 
+    /** "Is this Wi-Fi unlimited?" with both answers; a tap opens the main screen, which asks too. */
+    fun askWifi(context: Context, key: String) = post(
+        context, CHANNEL_ID, WIFI_NOTIFICATION_ID,
+        context.getString(R.string.tropa_wifi_question), context.getString(R.string.tropa_wifi_notify_text),
+        timeoutMs = null,
+    ) { builder ->
+        fun answer(limited: Boolean) = PendingIntent.getBroadcast(
+            context,
+            WIFI_NOTIFICATION_ID * 10 + if (limited) 1 else 0,
+            Intent(context, TropaServiceEventsReceiver::class.java)
+                .setAction(TropaServiceEventsReceiver.ACTION_WIFI_ANSWER)
+                .putExtra("key", key)
+                .putExtra("limited", limited),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        builder.setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(R.string.tropa_wifi_notify_text)))
+        builder.addAction(0, context.getString(R.string.tropa_wifi_unlimited), answer(limited = false))
+        builder.addAction(0, context.getString(R.string.tropa_wifi_limited), answer(limited = true))
+    }
+
+    fun cancelWifi(context: Context) {
+        NotificationManagerCompat.from(context).cancel(WIFI_NOTIFICATION_ID)
+    }
+
     fun cancel(context: Context) {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
         cancelRoaming(context)
+        cancelWifi(context)
     }
 
     private fun post(

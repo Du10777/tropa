@@ -18,6 +18,7 @@ class NodeHistoryTest {
         first.record("a", true, 50, 160)
         first.addConnections("a", conns = 10, fails = 1)
         first.stats("a")!!.speedKbps = 20_000
+        first.stats("a")!!.gateway = "89.19.220.1"
         val saved = Gson().fromJson(Gson().toJson(first.snapshot("a")), NodeHistory::class.java)
 
         now += 60_000
@@ -29,6 +30,7 @@ class NodeHistoryTest {
         assertEquals(50L, stats.median())
         assertEquals(160L, stats.fetchMedian())
         assertEquals(20_000L, stats.speedKbps)
+        assertEquals("89.19.220.1", stats.gateway)
         assertEquals(10L to 1L, stats.connections())
         // 2 answered checks + 9 good connections of 12.
         assertEquals(11.0 / 12, stats.reliability(), 1e-9)

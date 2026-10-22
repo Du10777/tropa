@@ -32,6 +32,7 @@ import io.github.du10777.tropa.data.Diagnosis
 import io.github.du10777.tropa.data.EnergyBudget
 import io.github.du10777.tropa.data.EnergyStore
 import io.github.du10777.tropa.data.LogLevel
+import io.github.du10777.tropa.data.MeteredWifi
 import io.github.du10777.tropa.data.Node
 import io.github.du10777.tropa.data.NodePlan
 import io.github.du10777.tropa.data.NodePlanner
@@ -80,6 +81,8 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
             ACTION_SUBSCRIPTION_CHANGED -> return TropaWatchdog.onSubscriptionChanged()
             ACTION_TEST_CELLULAR -> return testCellular(intent)
             ACTION_TEST_SPEED -> return TropaWatchdog.measureSpeedSoon()
+            ACTION_WIFI_ANSWER -> return answerWifi(context, intent)
+            ACTION_TEST_WIFI -> return testWifi(intent)
         }
         when (intent.getIntExtra("key", 0)) {
             AppConfig.MSG_STATE_START_SUCCESS -> TropaWatchdog.start(context)
@@ -101,6 +104,12 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
         /** Test bench: measure the speed of the current server at the next round (root only, like TEST_CELLULAR). */
         const val ACTION_TEST_SPEED = "io.github.du10777.tropa.action.TEST_SPEED"
 
+        /** The person answered from the notification whether the Wi-Fi is limited (extras key, limited). */
+        const val ACTION_WIFI_ANSWER = "io.github.du10777.tropa.action.WIFI_ANSWER"
+
+        /** Test bench without Wi-Fi: pretend one (extras key, metered; clear=true goes back), root only. */
+        const val ACTION_TEST_WIFI = "io.github.du10777.tropa.action.TEST_WIFI"
+
         /** Lets the watchdog (VPN service process) pick up changed settings right away. */
         fun wakeWatchdog(context: Context) {
             context.sendBroadcast(Intent(ACTION_WAKE).setPackage(context.packageName))
@@ -109,6 +118,19 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
         /** The active subscription was updated in the UI: the running tunnel takes its servers over. */
         fun subscriptionChanged(context: Context) {
             context.sendBroadcast(Intent(ACTION_SUBSCRIPTION_CHANGED).setPackage(context.packageName))
+        }
+
+        private fun answerWifi(context: Context, intent: Intent) {
+            val key = intent.getStringExtra("key") ?: return
+            MeteredWifi.remember(key, intent.getBooleanExtra("limited", true))
+            TropaNotifier.cancelWifi(context)
+            TropaWatchdog.wakeUp()
+        }
+
+        private fun testWifi(intent: Intent) {
+            MeteredWifi.override = if (intent.getBooleanExtra("clear", false)) null else
+                MeteredWifi.Wifi(intent.getStringExtra("key") ?: "test", intent.getBooleanExtra("metered", true))
+            TropaWatchdog.wakeUp()
         }
 
         private fun testCellular(intent: Intent) {
@@ -164,6 +186,9 @@ object TropaWatchdog {
 
     /** A server down this many checks in a row while another carries the connection is probed directly. */
     private const val UNREACHABLE_AFTER = 3
+
+    /** On a limited Wi-Fi the checks come this many times less often (and their probes are 16 times smaller). */
+    private const val ECONOMY_FACTOR = 4
 
     /** While connected, a server check with the same outcome as before is logged once in this time. */
     private const val QUIET_LOG_MS = 10 * 60_000L
@@ -375,6 +400,8 @@ object TropaWatchdog {
         /** The time to fetch the 128 KB of the self-test (self-test checks only). */
         val fetchMs: Long? = null,
         val selftest: Boolean = false,
+        /** The node's gateway named by its self-test answer. */
+        val gateway: String? = null,
     )
 
     /** One watch session: from the core start until it stops. */
@@ -443,6 +470,13 @@ object TropaWatchdog {
         /** The background check of the server names (LastIP), started with the session. */
         private var addressCheck: kotlinx.coroutines.Job? = null
 
+        /** A limited Wi-Fi (see [MeteredWifi]): small and rare checks, no speed tests. */
+        private var economy = false
+
+        /** The metered Wi-Fi the person is asked about (its key), and the ones asked in this session. */
+        private var wifiAsk: String? = null
+        private val wifiAsked = HashSet<String>()
+
         /** What the network lets through, asked when no server answers (once per outage and network, see [diagnose]). */
         private var diagnosis: Diagnosis.Result? = null
         private var diagnosedAt = 0L
@@ -465,6 +499,7 @@ object TropaWatchdog {
             var attempt = 0
             while (currentCoroutineContext().isActive) {
                 refreshSettings()
+                updateWifi()
                 val cell = cellular()
                 if (guardRoaming(cell)) {
                     connectedAt = 0L
@@ -672,7 +707,7 @@ object TropaWatchdog {
             plan = NodePlan(plan.balancerTag, watched, watched)
             selector.retain(watched.map { it.tag })
             leaving = gone?.tag
-            if (added.isNotEmpty()) probeAll(added.map { it.tag })
+            if (added.isNotEmpty()) probeAll(added.map { it.tag }, probeBytes())
             gone?.let { moveOff(it.tag) }
             publish(WatchPhase.CONNECTED)
         }
@@ -690,7 +725,7 @@ object TropaWatchdog {
                 return
             }
             val candidate = fresh.nodes.firstOrNull()?.let { addToCore(it, emptyMap()) }
-            if (candidate == null || !confirmed(candidate.tag, checkServer(candidate.tag))) {
+            if (candidate == null || !confirmed(candidate.tag, checkServer(candidate.tag, probeBytes()))) {
                 record(subscriptionEvent("new server does not answer: staying on the current one"))
                 return
             }
@@ -750,7 +785,7 @@ object TropaWatchdog {
             if (activeTag == gone) {
                 val next = selector.bestAlive(except = gone) ?: return
                 // A server checked by the self-test got its 128 KB already; a classic one downloads now.
-                if (selector.stats(next)?.selftest != true && !throughputOk(next)) {
+                if (selector.stats(next)?.selftest != true && !economy && !throughputOk(next)) {
                     selector.record(next, ok = false, latencyMs = null)
                     return
                 }
@@ -812,7 +847,8 @@ object TropaWatchdog {
         private suspend fun establish(): Boolean {
             val tags = plan.nodes.map { it.tag }
             val answers = Channel<Pair<String, Check>>(Channel.UNLIMITED)
-            val probes = tags.associateWith { tag -> scope.async { checkServer(tag).also { answers.trySend(tag to it) } } }
+            val bytes = probeBytes()
+            val probes = tags.associateWith { tag -> scope.async { checkServer(tag, bytes).also { answers.trySend(tag to it) } } }
             repeat(tags.size) {
                 val (tag, check) = answers.receive()
                 if (confirmed(tag, check)) {
@@ -828,7 +864,7 @@ object TropaWatchdog {
         }
 
         /** A live server that may carry traffic: the self-test proved it, a classic one passes the download check. */
-        private fun confirmed(tag: String, check: Check): Boolean = check.ok && (check.selftest || passesDownload(tag))
+        private fun confirmed(tag: String, check: Check): Boolean = check.ok && (check.selftest || economy || passesDownload(tag))
 
         private fun passesDownload(tag: String): Boolean {
             select(tag)
@@ -868,6 +904,7 @@ object TropaWatchdog {
             while (currentCoroutineContext().isActive && CheckSettings.enabled) {
                 val woken = waitBetweenChecks(nextDelay)
                 refreshSettings()
+                updateWifi()
                 val cell = cellular()
                 if (!CheckSettings.enabled || Roaming.mustBlock(cell) || pauseReasonOf(cell) != null) return true
                 ensureOverride()
@@ -905,7 +942,7 @@ object TropaWatchdog {
                     logScale()
                     continue
                 }
-                val bytes = if (screenOn) SelfTest.PROBE_BYTES else SelfTest.ALIVE_BYTES
+                val bytes = probeBytes(watching = true)
                 // All servers are checked at the same time, the active one included.
                 val tags = if (othersDue) plan.nodes.map { it.tag } else listOf(tag)
                 val result = probeAll(tags, bytes).getValue(tag)
@@ -924,7 +961,7 @@ object TropaWatchdog {
                 val after = System.currentTimeMillis()
                 val speedAt = budgetedMs(CheckKind.SPEED, cfg.downloadIntervalSec)
                 if (speedSoon.getAndSet(false)) speedDue = true
-                if (screenOn && result.ok && !carries && (speedDue || after - lastThroughputAt >= speedAt)) {
+                if (screenOn && result.ok && !carries && !economy && (speedDue || after - lastThroughputAt >= speedAt)) {
                     if (result.selftest) measureSpeed(tag)
                     else if (!throughputOk(tag)) selector.record(tag, ok = false, latencyMs = null)
                     lastThroughputAt = after
@@ -1003,7 +1040,7 @@ object TropaWatchdog {
         }
 
         /** The LastIP of a server's name, null for a server given by IP or not proven yet. */
-        private fun lastIpOf(node: io.github.du10777.tropa.data.Node): String? =
+        private fun lastIpOf(node: Node): String? =
             Diagnosis.serverResource(node)?.host?.takeIf(ServerAddresses::isName)?.let(ServerAddresses::lastIp)
 
         /** Keeps what this session learned about the servers, at most every minute unless [force]. */
@@ -1029,12 +1066,54 @@ object TropaWatchdog {
             val mode = screenMode()
             val kind = if (mode == ScreenMode.ON) CheckKind.ACTIVE else CheckKind.SCREEN_OFF
             val seed = if (mode == ScreenMode.ON) cfg.activeIntervalSec else cfg.screenOffIntervalSec
-            return energy.intervalSec(kind, seed, mode, battery, planned(mode)) * 1000L
+            return energy.intervalSec(kind, seed, mode, battery, planned(mode)) * 1000L * economyFactor()
+        }
+
+        private fun economyFactor(): Int = if (economy) ECONOMY_FACTOR else 1
+
+        /** The self-test probe: 8 KB on a limited Wi-Fi; else 128 KB, or 64 KB for a watch round with the screen off. */
+        private fun probeBytes(watching: Boolean = false): Long = when {
+            economy -> SelfTest.ECONOMY_BYTES
+            watching && !screenOn -> SelfTest.ALIVE_BYTES
+            else -> SelfTest.PROBE_BYTES
+        }
+
+        /**
+         * Looks at the Wi-Fi under the VPN: a limited one (or a metered one not answered about yet)
+         * turns the economy on. About a metered one the person has not answered, Tropa asks once per
+         * session: a silent notification with the answers, and the main screen shows the question too.
+         */
+        private fun updateWifi() {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            val wifi = cm?.let { MeteredWifi.of(it, runCatching { underlyingNetwork(it) }.getOrNull()) }
+            val limited = wifi?.let { MeteredWifi.limited(it.key) }
+            val now = MeteredWifi.economy(wifi, limited)
+            if (now != economy) {
+                economy = now
+                val why = when {
+                    !now -> null
+                    limited == true -> "limited Wi-Fi"
+                    else -> "metered Wi-Fi, not answered yet"
+                }
+                record(
+                    ProbeEvent(
+                        System.currentTimeMillis(), "economy", "", null, if (now) "on" else "off", ok = true,
+                        detail = why?.let { "$it: ${SelfTest.ECONOMY_BYTES / 1024} KB checks, $ECONOMY_FACTOR times rarer, no speed tests" },
+                    ),
+                )
+            }
+            val ask = wifi?.key?.takeIf { MeteredWifi.shouldAsk(wifi, limited) }
+            if (ask != wifiAsk) {
+                if (ask == null) TropaNotifier.cancelWifi(context)
+                wifiAsk = ask
+                if (ask != null && wifiAsked.add(ask)) TropaNotifier.askWifi(context, ask)
+                publish(phase)
+            }
         }
 
         /** The interval of a screen-on check of [kind] after the battery budget, ms. */
         private fun budgetedMs(kind: CheckKind, seedSec: Int): Long =
-            energy.intervalSec(kind, seedSec, ScreenMode.ON, battery, planned(ScreenMode.ON)) * 1000L
+            energy.intervalSec(kind, seedSec, ScreenMode.ON, battery, planned(ScreenMode.ON)) * 1000L * economyFactor()
 
         private fun planned(mode: ScreenMode): Double {
             // A self-test check is one request; a classic one asks every latency address.
@@ -1156,26 +1235,31 @@ object TropaWatchdog {
             } else {
                 val result = selfTest(tag, bytes)
                 when {
-                    result.alive -> {
+                    result.aliveFor(bytes) -> {
                         if (support.yes(key)) noteMode(tag, selftest = true)
-                        recordCheck(tag, selfTestEvent(tag, result))
-                        Check(ok = true, latencyMs = result.latencyMs, fetchMs = result.fetchMs(), selftest = true)
+                        recordCheck(tag, selfTestEvent(tag, result, bytes))
+                        // A probe under 64 KB tells nothing about the speed: servers are then compared by the first byte.
+                        val fetchMs = if (bytes >= SelfTest.ALIVE_BYTES) result.fetchMs() else null
+                        Check(ok = true, latencyMs = result.latencyMs, fetchMs = fetchMs, selftest = true, gateway = result.gatewayIp)
                     }
 
-                    result.maybeUnsupported -> {
+                    result.maybeUnsupportedFor(bytes) -> {
                         val fallback = classic(tag, note = "self-test: " + shortError(result.error ?: "no answer"))
                         if (fallback.ok && support.no(key)) noteMode(tag, selftest = false)
                         fallback
                     }
 
                     else -> {
-                        recordCheck(tag, selfTestEvent(tag, result))
+                        recordCheck(tag, selfTestEvent(tag, result, bytes))
                         Check(ok = false)
                     }
                 }
             }
             selector.record(tag, check.ok, check.latencyMs, check.fetchMs)
-            if (check.ok) selector.stats(tag)?.selftest = check.selftest
+            if (check.ok) {
+                selector.stats(tag)?.selftest = check.selftest
+                check.gateway?.let { selector.stats(tag)?.gateway = it }
+            }
             return check
         }
 
@@ -1193,11 +1277,16 @@ object TropaWatchdog {
             return result
         }
 
-        private fun selfTestEvent(tag: String, result: SelfTestResult): ProbeEvent {
-            val ok = result.alive
-            val probe = ProbeResult(ok = ok, status = result.status, latencyMs = result.fetchMs() ?: result.totalMs, totalMs = result.totalMs, bytes = result.bytes)
+        private fun selfTestEvent(tag: String, result: SelfTestResult, bytes: Long): ProbeEvent {
+            val ok = result.aliveFor(bytes)
+            val shown = if (bytes >= SelfTest.ALIVE_BYTES) result.fetchMs() ?: result.totalMs else result.totalMs
+            val probe = ProbeResult(ok = ok, status = result.status, latencyMs = shown, totalMs = result.totalMs, bytes = result.bytes)
             val error = if (ok) null else shortError(result.error ?: "no answer") + if (result.bytes > 0) " (${result.bytes / 1024} KB came)" else ""
-            val detail = if (ConnectionLog.level >= LogLevel.VERBOSE && result.status > 0) "first byte ${result.latencyMs} ms" else null
+            val detail = if (ConnectionLog.level >= LogLevel.VERBOSE && result.status > 0) {
+                listOfNotNull("first byte ${result.latencyMs} ms", result.gatewayIp?.let { "gateway $it" }).joinToString(" · ")
+            } else {
+                null
+            }
             return event(tag, "selftest", "", ok, probe, error = error, detail = detail)
         }
 
@@ -1362,10 +1451,10 @@ object TropaWatchdog {
                 val ttl = if (Diagnosis.offline(held.verdict)) NO_INTERNET_RECHECK_MS - 5_000 else Diagnosis.TTL_MS
                 if (key == diagnosedNetwork && now - diagnosedAt < ttl) return held
             }
-            val result = if (cm == null || network == null) {
+            val probe = network?.let { NetworkProbe(it, ServerAddresses::lastIp) }
+            val result = if (cm == null || probe == null) {
                 Diagnosis.Result(Diagnosis.Verdict.NO_NETWORK, emptyMap(), null)
             } else {
-                val probe = NetworkProbe(network, ServerAddresses::lastIp)
                 val probes = probe.probeAll(Diagnosis.resources(plan.nodes, cfg.directUrls), Diagnosis.parallel(cellular()))
                 val gateway = if (probes.values.none { it.reach == Diagnosis.Reach.AVAILABLE }) probe.gatewayAnswers(cm) else null
                 Diagnosis.Result(Diagnosis.verdict(probes, gateway), probes, gateway)
@@ -1374,7 +1463,7 @@ object TropaWatchdog {
             diagnosedAt = System.currentTimeMillis()
             diagnosedNetwork = key
             recordDiagnosis(result, startedAt = now)
-            if (result.verdict == Diagnosis.Verdict.SERVERS_BLOCKED) reportBlockedServers(result)
+            if (result.verdict == Diagnosis.Verdict.SERVERS_BLOCKED && probe != null) scope.launch { reportBlockedServers(result, probe) }
             return result
         }
 
@@ -1416,7 +1505,8 @@ object TropaWatchdog {
          * is probed directly, outside the tunnel (once a day per server and its LastIP). When its port
          * does not answer while foreign sites do, its address may be blocked from this network: that
          * goes to the log and, as a short report, to the server (the report goes out past the tunnel,
-         * so the server sees the address of this network).
+         * so the server sees the address of this network). The node's gateway (from its self-test
+         * answers) tells which: it answers → the server's own address; silent too → its whole network.
          */
         private fun checkDownServers() {
             val active = activeTag ?: return
@@ -1429,20 +1519,44 @@ object TropaWatchdog {
             }
         }
 
-        private suspend fun probeDownServer(node: io.github.du10777.tropa.data.Node, server: Diagnosis.Resource, ip: String) {
+        private suspend fun probeDownServer(node: Node, server: Diagnosis.Resource, ip: String) {
             val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
             val network = runCatching { underlyingNetwork(cm) }.getOrNull() ?: return
             val probe = NetworkProbe(network, ServerAddresses::lastIp)
             val direct = probe.probe(server)
             val foreign = probe.probeAll(Diagnosis.resources(emptyList(), emptyList()), parallel = true)
-            reportUnreachable(node.name.ifEmpty { node.tag }, server, ip, direct, foreign.values.count { it.reach == Diagnosis.Reach.AVAILABLE }, foreign.size)
+            val foreignUp = foreign.values.count { it.reach == Diagnosis.Reach.AVAILABLE }
+            val gateway = if (direct.reach != Diagnosis.Reach.AVAILABLE && foreignUp > 0) checkGateway(node, probe) else null
+            reportUnreachable(node.name.ifEmpty { node.tag }, server, ip, direct, foreignUp, foreign.size, gateway)
+        }
+
+        /** The node's gateway and whether it answers a ping from this network. */
+        private data class GatewayCheck(val ip: String, val answers: Boolean)
+
+        /** Null when the node never named its gateway (no self-test, or an older server). */
+        private suspend fun checkGateway(node: Node, probe: NetworkProbe): GatewayCheck? {
+            val gateway = selector.stats(node.tag)?.gateway ?: return null
+            return GatewayCheck(gateway, probe.ping(gateway))
         }
 
         /** Logs a server's direct reachability; one that does not answer while the internet works is reported. */
-        private fun reportUnreachable(name: String, server: Diagnosis.Resource, ip: String, direct: Diagnosis.Probe, foreignUp: Int, foreignAll: Int) {
+        private fun reportUnreachable(
+            name: String,
+            server: Diagnosis.Resource,
+            ip: String,
+            direct: Diagnosis.Probe,
+            foreignUp: Int,
+            foreignAll: Int,
+            gateway: GatewayCheck?,
+        ) {
             val blocked = direct.reach != Diagnosis.Reach.AVAILABLE && foreignUp > 0
-            val detail = "${direct.describe()} at $ip; foreign sites $foreignUp/$foreignAll" +
-                if (blocked) " — maybe blocked from this network, reported to the server" else ""
+            val verdict = when {
+                !blocked -> ""
+                gateway == null -> " — maybe blocked from this network, reported to the server"
+                gateway.answers -> "; its gateway ${gateway.ip} answers — the server's own address seems blocked here (or the server is off), reported to the server"
+                else -> "; its gateway ${gateway.ip} is silent too — the server's whole network seems unreachable from here, reported to the server"
+            }
+            val detail = "${direct.describe()} at $ip; foreign sites $foreignUp/$foreignAll$verdict"
             record(ProbeEvent(System.currentTimeMillis(), "unreachable", name, "${server.host}:${server.port}", "", ok = !blocked, detail = detail))
             if (!blocked) return
             ProblemReports.saveUnreachable(
@@ -1454,6 +1568,8 @@ object TropaWatchdog {
                     "probe" to direct.describe(),
                     "reach" to direct.reach.name.lowercase(Locale.ROOT),
                     "foreignSites" to "$foreignUp/$foreignAll",
+                    "gateway" to gateway?.ip,
+                    "gatewayAnswers" to gateway?.answers,
                     "operator" to cellular().operator,
                 ),
             )
@@ -1461,15 +1577,15 @@ object TropaWatchdog {
         }
 
         /** Every server is down while foreign sites answer: each unreachable one is reported (once a day). */
-        private fun reportBlockedServers(result: Diagnosis.Result) {
+        private suspend fun reportBlockedServers(result: Diagnosis.Result, probe: NetworkProbe) {
             val foreign = result.probes.filterKeys { it.group == Diagnosis.Group.FOREIGN }.values
             val up = foreign.count { it.reach == Diagnosis.Reach.AVAILABLE }
-            result.probes.filterKeys { it.group == Diagnosis.Group.SERVER }.forEach { (server, probe) ->
-                if (probe.reach == Diagnosis.Reach.AVAILABLE) return@forEach
+            result.probes.filterKeys { it.group == Diagnosis.Group.SERVER }.forEach { (server, direct) ->
+                if (direct.reach == Diagnosis.Reach.AVAILABLE) return@forEach
                 val node = plan.nodes.firstOrNull { Diagnosis.serverResource(it)?.host == server.host } ?: return@forEach
                 val ip = ServerAddresses.lastIp(server.host) ?: server.host
                 if (!UnreachableChecks.take(UnreachableChecks.key(node.fingerprint.ifEmpty { server.host }, ip))) return@forEach
-                reportUnreachable(server.label, server, ip, probe, up, foreign.size)
+                reportUnreachable(server.label, server, ip, direct, up, foreign.size, if (up > 0) checkGateway(node, probe) else null)
             }
         }
 
@@ -1587,6 +1703,8 @@ object TropaWatchdog {
                     pause = pauseReason.takeIf { phase == WatchPhase.PAUSED },
                     diagnosis = diagnosis?.verdict?.name?.takeIf { phase == WatchPhase.NO_SERVER || phase == WatchPhase.NO_INTERNET },
                     roamingMcc = roamingMcc.takeIf { phase == WatchPhase.ROAMING },
+                    economy = economy,
+                    wifiAsk = wifiAsk,
                     trafficBaseRx = trafficBaseRx,
                     trafficBaseTx = trafficBaseTx,
                 )

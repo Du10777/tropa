@@ -408,6 +408,7 @@ private fun StatusBlock(state: MainUiState, onClick: (() -> Unit)? = null) {
                 hint = listOfNotNull(
                     watch.checkedAt.takeIf { it > 0 }?.let { stringResource(R.string.tropa_status_checked_ago, agoText(now - it)) },
                     watch.activeName,
+                    if (watch.economy) stringResource(R.string.tropa_status_economy) else null,
                 ).joinToString(" · ")
             }
 

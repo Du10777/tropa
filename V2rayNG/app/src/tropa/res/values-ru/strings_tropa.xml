@@ -379,4 +379,18 @@
     <string name="tropa_diag_servers_blocked">серверы заблокированы</string>
     <string name="tropa_diag_servers_reachable">серверы доступны</string>
     <string name="tropa_checks_upload_hint">Обычно хватает проверки скорости скачивания. Включите, если важна и скорость отправки (видеозвонки, выгрузка файлов). Удваивает тест-трафик.</string>
+    <string name="tropa_log_economy">Экономия трафика</string>
+    <string name="tropa_status_economy">экономия трафика</string>
+    <string name="tropa_wifi_question">Этот Wi-Fi безлимитный?</string>
+    <string name="tropa_wifi_dialog_text">Android считает эту сеть Wi-Fi лимитной — например, это раздача интернета с телефона. Если трафик здесь ограничен, Тропа будет тратить на проверки связи в десятки раз меньше: проверять реже, меньшими запросами и без замеров скорости.</string>
+    <string name="tropa_wifi_notify_text">Если трафик в этой сети ограничен, Тропа будет тратить на проверки связи в десятки раз меньше.</string>
+    <string name="tropa_wifi_unlimited">Безлимитный</string>
+    <string name="tropa_wifi_limited">Лимитный</string>
+    <string name="tropa_wifi_title">Лимитный Wi-Fi</string>
+    <string name="tropa_wifi_hint">Если Android считает сеть Wi-Fi лимитной (например, это раздача интернета с телефона), Тропа спрашивает, ограничен ли в ней трафик, и запоминает ответ для этой сети. В лимитной сети проверки связи тратят в десятки раз меньше трафика: они реже, меньше и без замеров скорости.</string>
+    <string name="tropa_wifi_current_limited">Текущая сеть Wi-Fi: лимитная, проверки экономят трафик.</string>
+    <string name="tropa_wifi_current_unlimited">Текущая сеть Wi-Fi: безлимитная.</string>
+    <string name="tropa_wifi_current_metered">Текущая сеть Wi-Fi: Android считает её лимитной. Ответа ещё не было, поэтому пока проверки экономят трафик.</string>
+    <string name="tropa_wifi_current_plain">Текущая сеть Wi-Fi: безлимитная (так считает Android).</string>
+    <string name="tropa_wifi_forget">Забыть ответы о сетях (%1$d)</string>
 </resources>

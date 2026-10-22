@@ -46,6 +46,7 @@ import io.github.du10777.tropa.data.Connections
 import io.github.du10777.tropa.data.EnergyModel
 import io.github.du10777.tropa.data.EnergySettings
 import io.github.du10777.tropa.data.EnergyStore
+import io.github.du10777.tropa.data.MeteredWifi
 import io.github.du10777.tropa.service.TropaServiceEventsReceiver
 import io.github.du10777.tropa.ui.common.TropaTopBar
 import io.github.du10777.tropa.ui.theme.TropaColors
@@ -172,6 +173,9 @@ class TropaChecksActivity : BaseComponentActivity() {
                             CheckSettings.checkUpload = it
                             TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
                         }
+                        WifiCard(remember { MeteredWifi.current(this@TropaChecksActivity) }) {
+                            TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
+                        }
                         MoreCard(values, server)
                         EnergyCard(energy, energyModel) { changed ->
                             energy = changed
@@ -204,6 +208,50 @@ private fun ToggleCard(@StringRes title: Int, @StringRes hint: Int, checked: Boo
                 onCheckedChange = onChange,
                 colors = SwitchDefaults.colors(checkedTrackColor = TropaColors.Brand, checkedThumbColor = Color.White),
             )
+        }
+    }
+}
+
+/**
+ * Limited Wi-Fi: what Tropa does on one, the answer about the Wi-Fi the phone is on (changeable),
+ * and forgetting all answers.
+ */
+@Composable
+private fun WifiCard(wifi: MeteredWifi.Wifi?, onChange: () -> Unit) {
+    var limited by remember { mutableStateOf(wifi?.let { MeteredWifi.limited(it.key) }) }
+    var answered by remember { mutableStateOf(MeteredWifi.answered()) }
+    fun answer(value: Boolean) {
+        val key = wifi?.key ?: return
+        MeteredWifi.remember(key, value)
+        limited = value
+        answered = MeteredWifi.answered()
+        onChange()
+    }
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.tropa_wifi_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.tropa_wifi_hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (wifi != null) {
+                val now = when {
+                    limited == true -> R.string.tropa_wifi_current_limited
+                    limited == false -> R.string.tropa_wifi_current_unlimited
+                    wifi.metered -> R.string.tropa_wifi_current_metered
+                    else -> R.string.tropa_wifi_current_plain
+                }
+                Text(stringResource(now), fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { answer(false) }, enabled = limited != false) { Text(stringResource(R.string.tropa_wifi_unlimited)) }
+                    TextButton(onClick = { answer(true) }, enabled = limited != true) { Text(stringResource(R.string.tropa_wifi_limited)) }
+                }
+            }
+            if (answered > 0) {
+                TextButton(onClick = {
+                    MeteredWifi.forgetAll()
+                    limited = null
+                    answered = 0
+                    onChange()
+                }) { Text(stringResource(R.string.tropa_wifi_forget, answered)) }
+            }
         }
     }
 }

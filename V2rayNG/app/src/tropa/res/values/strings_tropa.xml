@@ -372,4 +372,18 @@
     <string name="tropa_diag_servers_blocked">servers blocked</string>
     <string name="tropa_diag_servers_reachable">servers reachable</string>
     <string name="tropa_checks_upload_hint">The download speed check is usually enough. Turn this on if the sending speed matters too (video calls, uploading files). Doubles the test traffic.</string>
+    <string name="tropa_log_economy">Traffic saving</string>
+    <string name="tropa_status_economy">saving traffic</string>
+    <string name="tropa_wifi_question">Is this Wi-Fi unlimited?</string>
+    <string name="tropa_wifi_dialog_text">Android marks this Wi-Fi as metered: maybe it is a phone sharing its mobile internet. If traffic here is limited, Tropa will spend tens of times less on connection checks: rarer, smaller and without speed tests.</string>
+    <string name="tropa_wifi_notify_text">If traffic on this network is limited, Tropa will spend tens of times less on connection checks.</string>
+    <string name="tropa_wifi_unlimited">Unlimited</string>
+    <string name="tropa_wifi_limited">Limited</string>
+    <string name="tropa_wifi_title">Limited Wi-Fi</string>
+    <string name="tropa_wifi_hint">When Android marks a Wi-Fi as metered (for example, a phone sharing its mobile internet), Tropa asks whether its traffic is limited and remembers the answer for that network. On a limited network the connection checks spend tens of times less traffic: rarer, smaller and without speed tests.</string>
+    <string name="tropa_wifi_current_limited">Current Wi-Fi: limited, the checks save traffic.</string>
+    <string name="tropa_wifi_current_unlimited">Current Wi-Fi: unlimited.</string>
+    <string name="tropa_wifi_current_metered">Current Wi-Fi: Android marks it as metered. No answer yet, so the checks save traffic for now.</string>
+    <string name="tropa_wifi_current_plain">Current Wi-Fi: unlimited (as Android says).</string>
+    <string name="tropa_wifi_forget">Forget the answers about networks (%1$d)</string>
 </resources>

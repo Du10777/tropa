@@ -39,6 +39,30 @@ class NodeChecksTest {
     }
 
     @Test
+    fun `an economy probe is alive when all of its 8 KB came right`() {
+        val small = SelfTestResult(status = 200, latencyMs = 60, totalMs = 70, bytes = 8 * 1024, verified = true, complete = true)
+        assertTrue(small.aliveFor(SelfTest.ECONOMY_BYTES))
+        assertFalse(small.maybeUnsupportedFor(SelfTest.ECONOMY_BYTES))
+        // The same answer to a 128 KB probe would be a stall, and quick enough to look like no self-test.
+        assertFalse(small.alive)
+        assertTrue(small.maybeUnsupported)
+        val cut = SelfTestResult(status = 200, latencyMs = 60, totalMs = 5000, bytes = 4 * 1024, verified = true, error = "context deadline exceeded")
+        assertFalse(cut.aliveFor(SelfTest.ECONOMY_BYTES))
+        val wrong = SelfTestResult(status = 200, totalMs = 90, bytes = 100, error = "unexpected content")
+        assertTrue(wrong.maybeUnsupportedFor(SelfTest.ECONOMY_BYTES))
+    }
+
+    @Test
+    fun `the gateway of the node is taken only as a plain IPv4 address`() {
+        val named = SelfTestResult.parse("""{"status":200,"bytes":131072,"verified":true,"complete":true,"gateway":"89.19.220.1"}""")
+        assertEquals("89.19.220.1", named.gatewayIp)
+        assertNull(SelfTestResult.parse("""{"status":200}""").gatewayIp)
+        listOf("-f", "89.19.220.1 -c 9", "256.1.1.1", "1.2.3", "router.example.com", "").forEach {
+            assertNull(SelfTestResult(gateway = it).gatewayIp, it)
+        }
+    }
+
+    @Test
     fun `speed in kilobits and its label`() {
         val r = SpeedResult.parse("""{"ok":true,"latencyMs":30,"bytes":5000000,"ms":2000}""")
         assertEquals(20_000L, r.kbps)

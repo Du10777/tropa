@@ -167,6 +167,12 @@ class TropaMainActivity : HelperBaseComponentActivity() {
             )
             if (state.roamingAsk) {
                 RoamingDialog(dailyBytes = state.roamingDailyBytes, onContinue = viewModel::allowRoaming, onLater = viewModel::dismissRoaming)
+            } else if (state.wifiAsk != null) {
+                WifiDialog(
+                    onUnlimited = { viewModel.answerWifi(limited = false) },
+                    onLimited = { viewModel.answerWifi(limited = true) },
+                    onLater = viewModel::dismissWifi,
+                )
             }
             state.update?.let { offer ->
                 UpdateDialog(

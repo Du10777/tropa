@@ -64,6 +64,9 @@ class NodeSelector(
         /** The last speed checks of this server (download, upload) and the user's traffic seen through it, kbit/s. */
         var speedKbps: Long? = null
         var uploadKbps: Long? = null
+
+        /** The node's gateway from its self-test answers: pinged when the server stops answering directly. */
+        var gateway: String? = null
         var trafficKbps: Long? = null
 
         /** The last check went through the self-test of the node (null before any check). */
@@ -129,6 +132,7 @@ class NodeSelector(
                 buckets = buckets.map { NodeHistory.Bucket(it.hour, it.conns, it.fails) },
                 speedKbps = speedKbps,
                 uploadKbps = uploadKbps,
+                gateway = gateway,
             )
         }
 
@@ -142,6 +146,7 @@ class NodeSelector(
             history.buckets.forEach { buckets.addLast(Bucket(it.hour, it.conns, it.fails)) }
             speedKbps = history.speedKbps
             uploadKbps = history.uploadKbps
+            gateway = history.gateway
             prune()
         }
 
