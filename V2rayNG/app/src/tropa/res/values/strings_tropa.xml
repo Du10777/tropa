@@ -364,6 +364,7 @@
     <string name="tropa_log_diagnosis">Diagnosis: %1$s</string>
     <string name="tropa_log_reach">reachability</string>
     <string name="tropa_log_address">server address</string>
+    <string name="tropa_log_dns">DNS inside the tunnel</string>
     <string name="tropa_diag_no_network">no network</string>
     <string name="tropa_diag_no_internet">no internet</string>
     <string name="tropa_diag_whitelist">white lists</string>

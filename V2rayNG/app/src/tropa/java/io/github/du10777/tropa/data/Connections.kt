@@ -264,6 +264,23 @@ object Connections {
         TropaPrefs.setAnnounce(id, SubscriptionInfo.decodeTitle(headers["announce"])?.take(MAX_ANNOUNCE_CHARS))
         TropaPrefs.setLinks(id, headers["support-url"], headers["profile-web-page-url"])
         saveServerChecks(id, headers["tropa-checks"])
+        saveServerDns(id, headers[TunnelDns.HEADER])
+    }
+
+    /** DNS through the tunnel (`Tropa-Dns`): the next core start takes it; a change goes into the log. */
+    private fun saveServerDns(id: String, header: String?) {
+        val dns = TunnelDns.parse(header)
+        if (dns == TropaPrefs.serverDns(id)) return
+        TropaPrefs.setServerDns(id, dns)
+        ConnectionLog.append(
+            AngApplication.application,
+            ProbeEvent(
+                System.currentTimeMillis(), "dns", MmkvManager.decodeSubscription(id)?.remarks.orEmpty(), null, "",
+                ok = dns != null || header.isNullOrBlank(),
+                detail = dns?.let { "the server resolves names inside the tunnel: $it" }
+                    ?: if (header.isNullOrBlank()) "the server has no DNS of its own, the config's DNS applies" else "unusable Tropa-Dns: $header",
+            ),
+        )
     }
 
     /**
@@ -296,6 +313,7 @@ object Connections {
         TropaPrefs.setAnnounce(id, null)
         TropaPrefs.setLinks(id, null, null)
         TropaPrefs.setServerChecks(id, null)
+        TropaPrefs.setServerDns(id, null)
         if (TropaPrefs.activeConnectionId == id) {
             TropaPrefs.activeConnectionId = list().firstOrNull()?.id
         }

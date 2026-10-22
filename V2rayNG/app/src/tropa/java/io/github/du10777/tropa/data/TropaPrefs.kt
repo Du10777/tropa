@@ -22,6 +22,7 @@ object TropaPrefs {
     private const val WEB_PAGE_URL = "tropa_web_page_url_"
     private const val SUBSCRIPTION_HASH = "tropa_subscription_hash_"
     private const val SERVER_CHECKS = "tropa_server_checks_"
+    private const val SERVER_DNS = "tropa_server_dns_"
 
     var localeInitialized: Boolean
         get() = MmkvManager.decodeSettingsBool(LOCALE_INITIALIZED, false)
@@ -97,6 +98,13 @@ object TropaPrefs {
 
     fun setServerChecks(connectionId: String, value: String?) {
         MmkvManager.encodeSettings(SERVER_CHECKS + connectionId, value.orEmpty())
+    }
+
+    /** The tunnel DNS a connection's server announced (`Tropa-Dns`, a checked `tcp://name:port`), null without it. */
+    fun serverDns(connectionId: String): String? = MmkvManager.decodeSettingsString(SERVER_DNS + connectionId)?.takeIf { it.isNotEmpty() }
+
+    fun setServerDns(connectionId: String, value: String?) {
+        MmkvManager.encodeSettings(SERVER_DNS + connectionId, value.orEmpty())
     }
 
     /** `Announce` subscription header (already decoded): a message from the server to its users. */

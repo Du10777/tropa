@@ -27,6 +27,7 @@ object LocalProxy {
     private const val USER = "tropa_proxy_user"
     private const val PASS = "tropa_proxy_pass"
     private const val INTERNAL_PORT = "tropa_internal_port"
+    private const val VPN_DNS_SAVED = "tropa_vpn_dns_saved"
     const val USER_TAG = "tropa-local"
     private val LOCAL_PROTOCOLS = setOf("socks", "http", "mixed")
     private const val ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -66,7 +67,28 @@ object LocalProxy {
         MmkvManager.encodeSettings(AppConfig.PREF_SOCKS_PASSWORD, token(24))
         // The runtime port lives in this process only; the UI reads it from here (updates through the tunnel).
         MmkvManager.encodeSettings(INTERNAL_PORT, SettingsManager.getSocksPort())
+        prepareVpnDns()
     }
+
+    /**
+     * With DNS inside the tunnel the VPN gives the phone its router address as the DNS server, so
+     * Android does not talk DNS-over-TLS past the core (see [TunnelDns]); otherwise the user's value
+     * comes back. Runs before the VPN is built, on every start.
+     */
+    private fun prepareVpnDns() {
+        val current = MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_DNS)
+        val saved = MmkvManager.decodeSettingsString(VPN_DNS_SAVED)?.takeIf { it.isNotEmpty() }
+        val server = Connections.activeId()?.let(TropaPrefs::serverDns)
+        val next = TunnelDns.vpnDnsFor(server, vpnRouter(), current, saved) ?: return
+        if (next == vpnRouter()) {
+            MmkvManager.encodeSettings(VPN_DNS_SAVED, current ?: TunnelDns.DEFAULT_VPN_DNS)
+        } else {
+            MmkvManager.encodeSettings(VPN_DNS_SAVED, "")
+        }
+        MmkvManager.encodeSettings(AppConfig.PREF_VPN_DNS, next)
+    }
+
+    private fun vpnRouter(): String = SettingsManager.getCurrentVpnInterfaceAddressConfig().ipv4Router
 
     /** The internal inbound of the running VPN, from any process (stale while the VPN is off). */
     fun internal(): Internal? {
@@ -76,19 +98,34 @@ object LocalProxy {
         return Internal(port, user, pass)
     }
 
+    /** Whether geosite.dat has the Russian list; the 10 MB file is read again only when it changes. */
+    private var geositeChecked: Triple<Long, Long, Boolean>? = null
+
+    @Synchronized
+    private fun russianGeosite(): Boolean {
+        val dir = java.io.File(com.v2ray.ang.util.Utils.userAssetPath(com.v2ray.ang.AngApplication.application))
+        val file = java.io.File(dir, "geosite.dat")
+        geositeChecked?.let { (length, modified, has) -> if (length == file.length() && modified == file.lastModified()) return has }
+        return TunnelDns.hasRussianGeosite(dir).also { geositeChecked = Triple(file.length(), file.lastModified(), it) }
+    }
+
     fun token(length: Int): String = buildString { repeat(length) { append(ALPHABET[random.nextInt(ALPHABET.length)]) } }
 
     /**
      * The config the core starts with: local inbounds replaced as described above, the traffic
      * counters per server on (see [TrafficWatch]), server names connecting to their last proven IP
-     * (see [ServerAddresses]), and in roaming without the user's consent everything blocked (see [Roaming]).
+     * (see [ServerAddresses]), DNS through the tunnel when the server has it (see [TunnelDns]), and in
+     * roaming without the user's consent everything blocked (see [Roaming]).
      */
     fun patchConfig(config: String): String {
         val user = SettingsManager.getSocksUsername() ?: return config
         val pass = SettingsManager.getSocksPassword() ?: return config
-        val patched = ServerAddresses.pinConfig(
+        var patched = ServerAddresses.pinConfig(
             patch(config, Internal(SettingsManager.getSocksPort(), user, pass), userProxy.takeIf { it.enabled }),
         )
+        val server = Connections.activeId()?.let(TropaPrefs::serverDns)
+        val router = vpnRouter().takeIf { MmkvManager.decodeSettingsString(AppConfig.PREF_VPN_DNS) == it }
+        patched = TunnelDns.patchConfig(patched, server, server != null && russianGeosite(), router)
         return if (Roaming.blocked) Roaming.blockAll(patched) else patched
     }
 
