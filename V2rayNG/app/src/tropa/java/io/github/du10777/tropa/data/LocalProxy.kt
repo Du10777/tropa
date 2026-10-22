@@ -80,13 +80,15 @@ object LocalProxy {
 
     /**
      * The config the core starts with: local inbounds replaced as described above, the traffic
-     * counters per server on (see [TrafficWatch]), and in roaming without the user's consent
-     * everything blocked (see [Roaming]).
+     * counters per server on (see [TrafficWatch]), server names connecting to their last proven IP
+     * (see [ServerAddresses]), and in roaming without the user's consent everything blocked (see [Roaming]).
      */
     fun patchConfig(config: String): String {
         val user = SettingsManager.getSocksUsername() ?: return config
         val pass = SettingsManager.getSocksPassword() ?: return config
-        val patched = patch(config, Internal(SettingsManager.getSocksPort(), user, pass), userProxy.takeIf { it.enabled })
+        val patched = ServerAddresses.pinConfig(
+            patch(config, Internal(SettingsManager.getSocksPort(), user, pass), userProxy.takeIf { it.enabled }),
+        )
         return if (Roaming.blocked) Roaming.blockAll(patched) else patched
     }
 

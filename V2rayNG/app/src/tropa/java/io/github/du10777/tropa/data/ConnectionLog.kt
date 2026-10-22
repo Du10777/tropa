@@ -182,7 +182,7 @@ object ConnectionLog {
     )
 
     /** Small notes: shown as plain grey lines. */
-    val NOTE_KINDS = setOf("screen_on", "screen_off", "core", "energy", "mode", "flow", "reach")
+    val NOTE_KINDS = setOf("screen_on", "screen_off", "core", "energy", "mode", "flow", "reach", "address")
 
     /** Checks that move data: the result shows the bytes too. */
     val BYTE_KINDS = setOf("download", "selftest", "speed", "upload")
@@ -232,6 +232,7 @@ object ConnectionLog {
             "mode" -> R.string.tropa_log_mode
             "flow" -> R.string.tropa_log_flow
             "reach" -> R.string.tropa_log_reach
+            "address" -> R.string.tropa_log_address
             "direct" -> R.string.tropa_log_direct
             "start" -> R.string.tropa_log_start
             "stop" -> R.string.tropa_log_stop

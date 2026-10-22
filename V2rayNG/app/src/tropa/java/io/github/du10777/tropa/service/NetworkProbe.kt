@@ -6,6 +6,7 @@ import io.github.du10777.tropa.data.Diagnosis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -29,7 +30,11 @@ import javax.net.ssl.SSLPeerUnverifiedException
  * (ICMP echo sockets need no root on Android), a port is a TCP connect, the web is one HTTP request
  * where any answer counts.
  */
-class NetworkProbe(private val network: Network?) {
+class NetworkProbe(
+    private val network: Network?,
+    /** The IP a server name is known to work at (LastIP), used instead of a DNS answer. */
+    private val pinned: (String) -> String? = { null },
+) {
     private val timeoutMs = Diagnosis.TIMEOUT_MS
 
     private val client: OkHttpClient by lazy {
@@ -41,10 +46,8 @@ class NetworkProbe(private val network: Network?) {
             .followSslRedirects(false)
             .retryOnConnectionFailure(false)
             .apply {
-                network?.let { n ->
-                    socketFactory(n.socketFactory)
-                    dns { host -> n.getAllByName(host).sortedBy { if (it is Inet4Address) 0 else 1 } }
-                }
+                network?.let { n -> socketFactory(n.socketFactory) }
+                dns { host -> pinned(host)?.let { listOf(InetAddress.getByName(it)) } ?: lookup(host) }
             }
             .build()
     }
@@ -110,7 +113,59 @@ class NetworkProbe(private val network: Network?) {
     }
 
     private fun resolve(host: String): InetAddress? =
-        (network?.getAllByName(host) ?: InetAddress.getAllByName(host)).sortedBy { if (it is Inet4Address) 0 else 1 }.firstOrNull()
+        pinned(host)?.let { InetAddress.getByName(it) } ?: lookup(host).firstOrNull()
+
+    /** A DNS answer on the physical network, IPv4 first. */
+    fun lookup(host: String): List<InetAddress> =
+        (network?.getAllByName(host) ?: InetAddress.getAllByName(host)).sortedBy { if (it is Inet4Address) 0 else 1 }
+
+    /** IPv4 addresses of [host] from the physical network's DNS; empty when DNS does not answer in time. */
+    suspend fun lookupIpv4(host: String): List<String> = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(timeoutMs) {
+            runCatching { runInterruptible { lookup(host).filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress } } }.getOrNull()
+        }.orEmpty()
+    }
+
+    /**
+     * Tries every candidate IP of a server at the same time and returns the first that answers:
+     * with [url] (a server with TLS) an HTTPS request for the name through that IP, certificate
+     * checked, so a stub address of a lying DNS cannot win; without it a TCP connect.
+     */
+    suspend fun race(host: String, port: Int, url: String?, candidates: List<String>): String? = coroutineScope {
+        val winner = kotlinx.coroutines.CompletableDeferred<String?>()
+        val tries = candidates.map { ip ->
+            launch(Dispatchers.IO) {
+                val ok = if (url != null) answersAt(url, ip) else connectTo(ip, port)
+                if (ok) winner.complete(ip)
+            }
+        }
+        launch {
+            tries.forEach { it.join() }
+            winner.complete(null)
+        }
+        val result = winner.await()
+        coroutineContext.cancelChildren()
+        result
+    }
+
+    private suspend fun answersAt(url: String, ip: String): Boolean = withContext(Dispatchers.IO) {
+        val single = client.newBuilder().dns { listOf(InetAddress.getByName(ip)) }.build()
+        runCatching { single.newCall(Request.Builder().url(url).build()).execute().use { true } }.getOrDefault(false)
+    }
+
+    private suspend fun connectTo(ip: String, port: Int): Boolean = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(timeoutMs + 1_000) {
+            runCatching {
+                runInterruptible {
+                    Socket().use { socket ->
+                        network?.bindSocket(socket)
+                        socket.connect(InetSocketAddress(InetAddress.getByName(ip), port), timeoutMs.toInt())
+                        true
+                    }
+                }
+            }.getOrDefault(false)
+        } ?: false
+    }
 
     /**
      * Any HTTP answer counts. With [anyCertificate] (a server's front page) a certificate the phone

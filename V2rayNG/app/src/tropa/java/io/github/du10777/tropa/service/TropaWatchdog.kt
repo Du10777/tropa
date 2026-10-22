@@ -44,6 +44,7 @@ import io.github.du10777.tropa.data.ScreenMode
 import io.github.du10777.tropa.data.SelfTest
 import io.github.du10777.tropa.data.SelfTestResult
 import io.github.du10777.tropa.data.SelfTestSupport
+import io.github.du10777.tropa.data.ServerAddresses
 import io.github.du10777.tropa.data.SpeedResult
 import io.github.du10777.tropa.data.SubscriptionRefresher
 import io.github.du10777.tropa.data.TrafficWatch
@@ -156,6 +157,9 @@ object TropaWatchdog {
 
     /** Server histories (NodeHistoryStore) are written at most this often while watching. */
     private const val HISTORY_SAVE_MS = 60_000L
+
+    /** During an outage the server names (LastIP) are checked before the first reconnect and every this many. */
+    private const val ADDRESS_RECHECK_ATTEMPTS = 5
 
     /** While connected, a server check with the same outcome as before is logged once in this time. */
     private const val QUIET_LOG_MS = 10 * 60_000L
@@ -432,6 +436,9 @@ object TropaWatchdog {
         /** Server histories are written at most this often (and when the plan changes). */
         private var historySavedAt = 0L
 
+        /** The background check of the server names (LastIP), started with the session. */
+        private var addressCheck: kotlinx.coroutines.Job? = null
+
         /** What the network lets through, asked when no server answers (once per outage and network, see [diagnose]). */
         private var diagnosis: Diagnosis.Result? = null
         private var diagnosedAt = 0L
@@ -450,6 +457,7 @@ object TropaWatchdog {
             scope.launch { captureCore() }
             scope.launch { refreshSubscriptions() }
             loadPlan()
+            addressCheck = scope.launch { checkAddresses() }
             var attempt = 0
             while (currentCoroutineContext().isActive) {
                 refreshSettings()
@@ -504,6 +512,12 @@ object TropaWatchdog {
                     if (updated) record(subscriptionEvent("no server answers: reconnecting on the new list"))
                 }
                 if (!updated) waitForWake(pauseMs)
+                // A server name may point elsewhere now (or DNS lies): the names are checked again
+                // before the first reconnect and every few after, so the reload takes the IP that works.
+                if (attempt == 1 || attempt % ADDRESS_RECHECK_ATTEMPTS == 0) {
+                    addressCheck?.join()
+                    checkAddresses()
+                }
                 record(ProbeEvent(System.currentTimeMillis(), "reload", "", null, "", ok = true))
                 connectedAt = 0L
                 reconnect(attempt, rotate = !updated)
@@ -1339,7 +1353,7 @@ object TropaWatchdog {
             val result = if (cm == null || network == null) {
                 Diagnosis.Result(Diagnosis.Verdict.NO_NETWORK, emptyMap(), null)
             } else {
-                val probe = NetworkProbe(network)
+                val probe = NetworkProbe(network, ServerAddresses::lastIp)
                 val probes = probe.probeAll(Diagnosis.resources(plan.nodes, cfg.directUrls), Diagnosis.parallel(cellular()))
                 val gateway = if (probes.values.none { it.reach == Diagnosis.Reach.AVAILABLE }) probe.gatewayAnswers(cm) else null
                 Diagnosis.Result(Diagnosis.verdict(probes, gateway), probes, gateway)
@@ -1349,6 +1363,39 @@ object TropaWatchdog {
             diagnosedNetwork = key
             recordDiagnosis(result, startedAt = now)
             return result
+        }
+
+        /**
+         * The LastIP of every server name (see [ServerAddresses]): the name is resolved on the
+         * physical network and the fresh answer and the LastIP are tried at the same time; the first
+         * that answers TLS for the name becomes the LastIP. A DNS answer that includes the LastIP
+         * needs no race. Returns whether a LastIP changed (the next core start uses it).
+         */
+        private suspend fun checkAddresses(): Boolean {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+            val network = runCatching { underlyingNetwork(cm) }.getOrNull() ?: return false
+            val probe = NetworkProbe(network)
+            var changed = false
+            plan.nodes.mapNotNull { node -> Diagnosis.serverResource(node)?.let { node to it } }
+                .filter { (_, server) -> ServerAddresses.isName(server.host) }
+                .distinctBy { (_, server) -> server.host }
+                .forEach { (node, server) ->
+                    val last = ServerAddresses.lastIp(server.host)
+                    val fresh = probe.lookupIpv4(server.host)
+                    if (last != null && last in fresh) return@forEach
+                    val candidates = (fresh + listOfNotNull(last)).distinct()
+                    val winner = if (candidates.isEmpty()) null else probe.race(server.host, server.port, server.url, candidates)
+                    if (winner != null && winner != last) {
+                        ServerAddresses.setLastIp(server.host, winner)
+                        changed = true
+                    }
+                    if (ConnectionLog.level >= LogLevel.VERBOSE || winner == null) {
+                        val dns = fresh.joinToString(" ").ifEmpty { "no answer" }
+                        val detail = "${server.host}: DNS $dns, last ${last ?: "none"} → ${winner ?: "nothing answers"}"
+                        record(ProbeEvent(System.currentTimeMillis(), "address", serverName(node.tag), null, "", ok = winner != null, detail = detail))
+                    }
+                }
+            return changed
         }
 
         /** The verdict as a log chip; every resource at the debug level. */

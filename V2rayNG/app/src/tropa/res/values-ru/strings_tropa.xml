@@ -370,6 +370,7 @@
     <string name="tropa_status_reachable_hint">Попытка %1$d, следующая через %2$d с</string>
     <string name="tropa_log_diagnosis">Диагностика: %1$s</string>
     <string name="tropa_log_reach">доступность</string>
+    <string name="tropa_log_address">адрес сервера</string>
     <string name="tropa_diag_no_network">нет сети</string>
     <string name="tropa_diag_no_internet">нет интернета</string>
     <string name="tropa_diag_whitelist">белые списки</string>

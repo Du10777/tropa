@@ -60,7 +60,8 @@ data class ProbeEvent(
      * checked by the self-test of its node, or the classic way) | flow (the core's counters of the
      * current server: the user's traffic, failing connections) | diagnosis (no server answers:
      * target = the verdict, detail = what answered) | reach (debug: one resource of the diagnosis,
-     * server = its name, address = host:port, target = its group, detail = ping, port, web).
+     * server = its name, address = host:port, target = its group, detail = ping, port, web) |
+     * address (the IP a server name connects to: the DNS answer, the last proven IP, the winner).
      */
     val kind: String,
     val server: String,
