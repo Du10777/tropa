@@ -46,9 +46,13 @@ class NodeSelector(
     private class Sample(val at: Long, val latencyMs: Long, val fetchMs: Long?)
     private class Outcome(val at: Long, val ok: Boolean)
 
+    /** The user's connections through a server in one hour (the core's counters), and how many failed. */
+    private class Bucket(val hour: Long, var conns: Long, var fails: Long)
+
     inner class Stats {
         private val samples = ArrayDeque<Sample>()
         private val outcomes = ArrayDeque<Outcome>()
+        private val buckets = ArrayDeque<Bucket>()
         var consecutiveFails = 0
             private set
         var checks = 0
@@ -89,10 +93,56 @@ class NodeSelector(
             return samples.lastOrNull()?.let { it.fetchMs != null }
         }
 
-        /** Share of answered checks in the window (1.0 with none yet: an untried server is not punished). */
+        /**
+         * Share of answered checks and of the user's connections that did not fail, in the window
+         * (1.0 with none yet: an untried server is not punished).
+         */
         fun reliability(): Double {
             prune()
-            return if (outcomes.isEmpty()) 1.0 else outcomes.count { it.ok }.toDouble() / outcomes.size
+            val conns = buckets.sumOf { it.conns }
+            val fails = buckets.sumOf { it.fails }.coerceAtMost(conns)
+            val total = outcomes.size + conns
+            return if (total == 0L) 1.0 else (outcomes.count { it.ok } + conns - fails).toDouble() / total
+        }
+
+        /** Connections of the user through this server and the failed ones (counted by the core) in the window. */
+        fun connections(): Pair<Long, Long> {
+            prune()
+            return buckets.sumOf { it.conns } to buckets.sumOf { it.fails }
+        }
+
+        internal fun addConnections(conns: Long, fails: Long) {
+            if (conns <= 0 && fails <= 0) return
+            val hour = now() / HOUR_MS * HOUR_MS
+            val last = buckets.lastOrNull()?.takeIf { it.hour == hour } ?: Bucket(hour, 0, 0).also { buckets.addLast(it) }
+            last.conns += conns.coerceAtLeast(0)
+            last.fails += fails.coerceAtLeast(0)
+            prune()
+        }
+
+        /** What is worth keeping for the next session (see [restore]). */
+        internal fun snapshot(): NodeHistory {
+            prune()
+            return NodeHistory(
+                samples = samples.map { NodeHistory.Sample(it.at, it.latencyMs, it.fetchMs) },
+                outcomes = outcomes.map { NodeHistory.Outcome(it.at, it.ok) },
+                buckets = buckets.map { NodeHistory.Bucket(it.hour, it.conns, it.fails) },
+                speedKbps = speedKbps,
+                uploadKbps = uploadKbps,
+            )
+        }
+
+        /**
+         * The history of earlier sessions: it ranks the server, but the server counts as neither alive
+         * nor dead until it is checked now (a cold start always checks).
+         */
+        internal fun restore(history: NodeHistory) {
+            history.samples.takeLast(maxSamples).forEach { samples.addLast(Sample(it.at, it.latencyMs, it.fetchMs)) }
+            history.outcomes.takeLast(maxSamples).forEach { outcomes.addLast(Outcome(it.at, it.ok)) }
+            history.buckets.forEach { buckets.addLast(Bucket(it.hour, it.conns, it.fails)) }
+            speedKbps = history.speedKbps
+            uploadKbps = history.uploadKbps
+            prune()
         }
 
         /** A check: answered or not; an answer without a time (the user's traffic flows through) counts as alive. */
@@ -115,6 +165,7 @@ class NodeSelector(
             val cutoff = now() - windowMs
             while (samples.isNotEmpty() && samples.first().at < cutoff) samples.removeFirst()
             while (outcomes.isNotEmpty() && outcomes.first().at < cutoff) outcomes.removeFirst()
+            while (buckets.isNotEmpty() && buckets.first().hour + HOUR_MS < cutoff) buckets.removeFirst()
         }
     }
 
@@ -139,6 +190,22 @@ class NodeSelector(
 
     @Synchronized
     fun stats(tag: String): Stats? = stats[tag]
+
+    /** The history of a server for the next session. */
+    @Synchronized
+    fun snapshot(tag: String): NodeHistory? = stats[tag]?.snapshot()
+
+    /** Puts the history of earlier sessions under [tag] (before its first check). */
+    @Synchronized
+    fun restore(tag: String, history: NodeHistory) {
+        stats.getOrPut(tag) { Stats() }.restore(history)
+    }
+
+    /** The user's connections through [tag] since the last look, from the core's counters. */
+    @Synchronized
+    fun addConnections(tag: String, conns: Long, fails: Long) {
+        stats[tag]?.addConnections(conns, fails)
+    }
 
     @Synchronized
     fun record(tag: String, ok: Boolean, latencyMs: Long?, fetchMs: Long? = null) {
@@ -184,7 +251,9 @@ class NodeSelector(
         stats.forEach { (tag, s) ->
             if (tag == active) return@forEach
             val median = rank(s, fetch)
-            val better = s.alive && median != null &&
+            // New connections do not move to a server that fails noticeably more often, however fast.
+            val steady = s.reliability() >= (stats[active]?.reliability() ?: 1.0) - FLAKIER_BY
+            val better = s.alive && steady && median != null &&
                 median <= activeMedian * betterRatio && activeMedian - median >= betterMinMs
             s.betterStreak = if (better) s.betterStreak + 1 else 0
             if (s.betterStreak >= betterRounds && (winner == null || median!! < rank(stats[winner]!!, fetch)!!)) winner = tag
@@ -196,6 +265,11 @@ class NodeSelector(
     }
 
     companion object {
+        private const val HOUR_MS = 60 * 60_000L
+
+        /** A server this much less reliable than the active one does not take its new connections. */
+        const val FLAKIER_BY = 0.1
+
         private val BACKOFF_SECONDS = listOf(3L, 5L, 10L, 20L, 30L)
 
         /** Pause before reconnect attempt [attempt] (1-based): 3, 5, 10, 20, 30, then 30 s. */

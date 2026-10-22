@@ -38,6 +38,7 @@ import io.github.du10777.tropa.data.NodePlanner
 import io.github.du10777.tropa.data.NodeSelector
 import io.github.du10777.tropa.data.ProblemReports
 import io.github.du10777.tropa.data.NodeCounter
+import io.github.du10777.tropa.data.NodeHistoryStore
 import io.github.du10777.tropa.data.Roaming
 import io.github.du10777.tropa.data.ScreenMode
 import io.github.du10777.tropa.data.SelfTest
@@ -152,6 +153,9 @@ object TropaWatchdog {
 
     /** Failing connections bring the check of the current server forward at most this often. */
     private const val EARLY_CHECK_MS = 30_000L
+
+    /** Server histories (NodeHistoryStore) are written at most this often while watching. */
+    private const val HISTORY_SAVE_MS = 60_000L
 
     /** While connected, a server check with the same outcome as before is logged once in this time. */
     private const val QUIET_LOG_MS = 10 * 60_000L
@@ -425,6 +429,9 @@ object TropaWatchdog {
         /** Server choices of the background end of the connect and of the watch rounds do not interleave. */
         private val steer = Any()
 
+        /** Server histories are written at most this often (and when the plan changes). */
+        private var historySavedAt = 0L
+
         /** What the network lets through, asked when no server answers (once per outage and network, see [diagnose]). */
         private var diagnosis: Diagnosis.Result? = null
         private var diagnosedAt = 0L
@@ -515,6 +522,8 @@ object TropaWatchdog {
         /** Reads the servers of the configuration the core runs (the saved one, the core starts from it). */
         private fun loadPlan() {
             subscriptionChanged.set(false)
+            // What this plan learned is kept before its servers are replaced (tags may be reused).
+            saveHistory(force = true)
             val config = savedConfig()
             plan = config?.let(NodePlanner::fromConfigJson) ?: NodePlan(null, emptyList())
             coreTags.clear()
@@ -525,6 +534,7 @@ object TropaWatchdog {
                 plan = NodePlan(null, listOf(Node(tag = "", name = "", protocol = "", address = null, transport = null)))
             }
             selector.reset(plan.nodes.map { it.tag })
+            restoreHistory()
             activeTag = null
             lastOthersAt = 0L
             lastThroughputAt = 0L
@@ -852,7 +862,11 @@ object TropaWatchdog {
                     continue
                 }
                 val now = System.currentTimeMillis()
-                val flow = traffic.look(counters(), now)[tag]
+                val flows = traffic.look(counters(), now)
+                // Every server's connections count for its history, not only the current one's.
+                plan.nodes.forEach { node -> flows[node.tag]?.let { selector.addConnections(node.tag, it.conns, it.fails) } }
+                saveHistory()
+                val flow = flows[tag]
                 flow?.kbps?.let { kbps -> selector.stats(tag)?.trafficKbps = kbps }
                 if (flow?.failing == true) noteFailing(tag, flow)
                 val carries = screenOn && flow?.carries == true
@@ -958,6 +972,27 @@ object TropaWatchdog {
             flow.kbps?.let { add(SpeedResult.label(it)) }
             add("connections ${flow.conns}, failed ${flow.fails}")
         }.joinToString(" · ")
+
+        /** What earlier sessions learned about the servers of the plan (by fingerprint). */
+        private fun restoreHistory() {
+            plan.nodes.forEach { node ->
+                if (node.fingerprint.isEmpty()) return@forEach
+                runCatching { NodeHistoryStore.load(node.fingerprint) }.getOrNull()?.let { selector.restore(node.tag, it) }
+            }
+        }
+
+        /** Keeps what this session learned about the servers, at most every minute unless [force]. */
+        private fun saveHistory(force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            if (!force && now - historySavedAt < HISTORY_SAVE_MS) return
+            historySavedAt = now
+            plan.nodes.forEach { node ->
+                if (node.fingerprint.isEmpty()) return@forEach
+                selector.snapshot(node.tag)?.let { history ->
+                    runCatching { NodeHistoryStore.save(node.fingerprint, history) }.onFailure { LogUtil.e(TAG, "cannot save the history of ${node.name}", it) }
+                }
+            }
+        }
 
         /** The core's counters per server (an empty map if it cannot tell). */
         private fun counters(): Map<String, NodeCounter> =
