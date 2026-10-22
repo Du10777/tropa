@@ -54,4 +54,19 @@ class LocalProxyTest {
         assertEquals("socks", result[0].get("tag").asString)
         assertEquals("not json", LocalProxy.patch("not json", LocalProxy.Internal(40000, "a", "b"), null))
     }
+
+    @Test
+    fun `VLESS users without encryption get none, others keep theirs`() {
+        val config = """{"outbounds":[
+            {"tag":"a","protocol":"vless","settings":{"vnext":[{"address":"x.example.com","port":443,"users":[{"id":"u1"},{"id":"u2","encryption":"mlkem768x25519plus.native.0rtt.abc"}]}]}},
+            {"tag":"b","protocol":"vless","settings":{"address":"y.example.com","port":443,"id":"u3"}},
+            {"tag":"c","protocol":"trojan","settings":{"servers":[{"address":"z.example.com","password":"p"}]}}]}"""
+        val root = com.google.gson.JsonParser.parseString(LocalProxy.patch(config, LocalProxy.Internal(34567, "u", "p"), null)).asJsonObject
+        val outbounds = root.getAsJsonArray("outbounds")
+        val users = outbounds[0].asJsonObject.getAsJsonObject("settings").getAsJsonArray("vnext")[0].asJsonObject.getAsJsonArray("users")
+        assertEquals("none", users[0].asJsonObject.get("encryption").asString)
+        assertEquals("mlkem768x25519plus.native.0rtt.abc", users[1].asJsonObject.get("encryption").asString)
+        assertEquals("none", outbounds[1].asJsonObject.getAsJsonObject("settings").get("encryption").asString)
+        assertFalse(outbounds[2].asJsonObject.getAsJsonObject("settings").has("encryption"))
+    }
 }

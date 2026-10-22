@@ -150,6 +150,7 @@ object LocalProxy {
         }
         // The watchdog reads the bytes per server (the user's traffic means the server is alive).
         TrafficWatch.enableStats(root)
+        fixVlessEncryption(root)
         return root.toString()
     }
 
@@ -176,6 +177,24 @@ object LocalProxy {
             })
             add("sniffing", sniffing)
         }
+
+    /**
+     * Xray 26 refuses a VLESS user without "encryption" ("please add/set encryption: none") and the
+     * whole core does not start. JSON subscriptions of some panels leave it out when the inbound was
+     * made without it: such users get "none", the only value a plain VLESS server takes.
+     */
+    internal fun fixVlessEncryption(root: JsonObject) {
+        root.get("outbounds")?.takeIf { it.isJsonArray }?.asJsonArray?.forEach { element ->
+            val outbound = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+            if (outbound.str("protocol") != "vless") return@forEach
+            val settings = outbound.get("settings")?.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
+            val users = settings.get("vnext")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?.flatMap { server -> server.takeIf { it.isJsonObject }?.asJsonObject?.get("users")?.takeIf { it.isJsonArray }?.asJsonArray?.toList().orEmpty() }
+                ?.mapNotNull { it.takeIf { u -> u.isJsonObject }?.asJsonObject }
+                .orEmpty() + listOfNotNull(settings.takeIf { it.has("id") })
+            users.forEach { user -> if (user.str("encryption").isNullOrEmpty()) user.addProperty("encryption", "none") }
+        }
+    }
 
     private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString
 }
