@@ -108,6 +108,18 @@ object ProblemReports {
         File(dir(context), "report-${System.currentTimeMillis()}.json.gz").writeBytes(body)
     }
 
+    /**
+     * A server that does not answer directly from this network while foreign sites do: maybe its
+     * address is blocked here. A short report without the log; the server's conductor adds the
+     * phone's address as it sees it (the report goes out past the tunnel).
+     */
+    fun saveUnreachable(context: Context, details: Map<String, Any?>) {
+        runCatching {
+            val report = build(context, null, "unreachable", null) + ("unreachable" to details)
+            keep(context, gzip(gson.toJson(report)))
+        }.onFailure { LogUtil.e(TAG, "Failed to save an unreachable report", it) }
+    }
+
     fun hasPending(context: Context): Boolean = dir(context).listFiles()?.isNotEmpty() == true
 
     sealed interface SendResult {

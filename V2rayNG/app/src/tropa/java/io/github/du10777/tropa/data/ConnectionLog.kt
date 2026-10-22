@@ -178,7 +178,7 @@ object ConnectionLog {
     /** Events that mark sessions and changes rather than checks: shown as chips. */
     val SESSION_KINDS = setOf(
         "start", "stop", "connected", "no_server", "no_internet", "reload", "switch", "network", "servers", "level",
-        "subscription", "roaming", "paused", "checks", "diagnosis", "dns",
+        "subscription", "roaming", "paused", "checks", "diagnosis", "dns", "unreachable",
     )
 
     /** Small notes: shown as plain grey lines. */
@@ -248,6 +248,7 @@ object ConnectionLog {
             "roaming" -> R.string.tropa_log_roaming
             "checks" -> R.string.tropa_log_checks
             "dns" -> R.string.tropa_log_dns
+            "unreachable" -> R.string.tropa_log_unreachable
             "energy" -> R.string.tropa_log_energy
             else -> R.string.tropa_log_reload
         }

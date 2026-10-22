@@ -48,6 +48,7 @@ import io.github.du10777.tropa.data.ServerAddresses
 import io.github.du10777.tropa.data.SpeedResult
 import io.github.du10777.tropa.data.SubscriptionRefresher
 import io.github.du10777.tropa.data.TrafficWatch
+import io.github.du10777.tropa.data.UnreachableChecks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -160,6 +161,9 @@ object TropaWatchdog {
 
     /** During an outage the server names (LastIP) are checked before the first reconnect and every this many. */
     private const val ADDRESS_RECHECK_ATTEMPTS = 5
+
+    /** A server down this many checks in a row while another carries the connection is probed directly. */
+    private const val UNREACHABLE_AFTER = 3
 
     /** While connected, a server check with the same outcome as before is logged once in this time. */
     private const val QUIET_LOG_MS = 10 * 60_000L
@@ -931,6 +935,7 @@ object TropaWatchdog {
                     moveOff(gone)
                     publish(WatchPhase.CONNECTED)
                 }
+                if (result.ok) checkDownServers()
                 nextDelay = if (result.ok) intervalMs() else RETRY_AFTER_FAILURE_MS
                 logScale()
             }
@@ -1369,6 +1374,7 @@ object TropaWatchdog {
             diagnosedAt = System.currentTimeMillis()
             diagnosedNetwork = key
             recordDiagnosis(result, startedAt = now)
+            if (result.verdict == Diagnosis.Verdict.SERVERS_BLOCKED) reportBlockedServers(result)
             return result
         }
 
@@ -1403,6 +1409,68 @@ object TropaWatchdog {
                     }
                 }
             return changed
+        }
+
+        /**
+         * Some servers stay down while another carries the connection: in the background each of them
+         * is probed directly, outside the tunnel (once a day per server and its LastIP). When its port
+         * does not answer while foreign sites do, its address may be blocked from this network: that
+         * goes to the log and, as a short report, to the server (the report goes out past the tunnel,
+         * so the server sees the address of this network).
+         */
+        private fun checkDownServers() {
+            val active = activeTag ?: return
+            plan.nodes.filter { it.tag != active && it.fingerprint.isNotEmpty() }.forEach { node ->
+                if ((selector.stats(node.tag)?.consecutiveFails ?: 0) < UNREACHABLE_AFTER) return@forEach
+                val server = Diagnosis.serverResource(node) ?: return@forEach
+                val ip = ServerAddresses.lastIp(server.host) ?: server.host
+                if (!UnreachableChecks.take(UnreachableChecks.key(node.fingerprint, ip))) return@forEach
+                scope.launch { probeDownServer(node, server, ip) }
+            }
+        }
+
+        private suspend fun probeDownServer(node: io.github.du10777.tropa.data.Node, server: Diagnosis.Resource, ip: String) {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
+            val network = runCatching { underlyingNetwork(cm) }.getOrNull() ?: return
+            val probe = NetworkProbe(network, ServerAddresses::lastIp)
+            val direct = probe.probe(server)
+            val foreign = probe.probeAll(Diagnosis.resources(emptyList(), emptyList()), parallel = true)
+            reportUnreachable(node.name.ifEmpty { node.tag }, server, ip, direct, foreign.values.count { it.reach == Diagnosis.Reach.AVAILABLE }, foreign.size)
+        }
+
+        /** Logs a server's direct reachability; one that does not answer while the internet works is reported. */
+        private fun reportUnreachable(name: String, server: Diagnosis.Resource, ip: String, direct: Diagnosis.Probe, foreignUp: Int, foreignAll: Int) {
+            val blocked = direct.reach != Diagnosis.Reach.AVAILABLE && foreignUp > 0
+            val detail = "${direct.describe()} at $ip; foreign sites $foreignUp/$foreignAll" +
+                if (blocked) " — maybe blocked from this network, reported to the server" else ""
+            record(ProbeEvent(System.currentTimeMillis(), "unreachable", name, "${server.host}:${server.port}", "", ok = !blocked, detail = detail))
+            if (!blocked) return
+            ProblemReports.saveUnreachable(
+                context,
+                mapOf(
+                    "server" to name,
+                    "address" to "${server.host}:${server.port}",
+                    "ip" to ip,
+                    "probe" to direct.describe(),
+                    "reach" to direct.reach.name.lowercase(Locale.ROOT),
+                    "foreignSites" to "$foreignUp/$foreignAll",
+                    "operator" to cellular().operator,
+                ),
+            )
+            scope.launch { ProblemReports.uploadPending(context) }
+        }
+
+        /** Every server is down while foreign sites answer: each unreachable one is reported (once a day). */
+        private fun reportBlockedServers(result: Diagnosis.Result) {
+            val foreign = result.probes.filterKeys { it.group == Diagnosis.Group.FOREIGN }.values
+            val up = foreign.count { it.reach == Diagnosis.Reach.AVAILABLE }
+            result.probes.filterKeys { it.group == Diagnosis.Group.SERVER }.forEach { (server, probe) ->
+                if (probe.reach == Diagnosis.Reach.AVAILABLE) return@forEach
+                val node = plan.nodes.firstOrNull { Diagnosis.serverResource(it)?.host == server.host } ?: return@forEach
+                val ip = ServerAddresses.lastIp(server.host) ?: server.host
+                if (!UnreachableChecks.take(UnreachableChecks.key(node.fingerprint.ifEmpty { server.host }, ip))) return@forEach
+                reportUnreachable(server.label, server, ip, probe, up, foreign.size)
+            }
         }
 
         /** The verdict as a log chip; every resource at the debug level. */

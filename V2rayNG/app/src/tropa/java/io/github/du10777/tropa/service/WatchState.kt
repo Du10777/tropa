@@ -62,7 +62,9 @@ data class ProbeEvent(
      * target = the verdict, detail = what answered) | reach (debug: one resource of the diagnosis,
      * server = its name, address = host:port, target = its group, detail = ping, port, web) |
      * address (the IP a server name connects to: the DNS answer, the last proven IP, the winner) |
-     * dns (session: the connection's server announced DNS inside the tunnel, or stopped; server = connection).
+     * dns (session: the connection's server announced DNS inside the tunnel, or stopped; server = connection) |
+     * unreachable (a server that stays down probed directly: ok = false when its address may be blocked
+     * from this network, then reported to the server).
      */
     val kind: String,
     val server: String,

@@ -22,6 +22,8 @@ object Cellular {
         val generation: Generation = Generation.UNKNOWN,
         /** Signal bars 0–4 (Android 9+), null when unknown. */
         val signalLevel: Int? = null,
+        /** The network's operator code and name ("25020 Tele2"), for the reports; null when unknown. */
+        val operator: String? = null,
     ) {
         /** Roaming is another country: a foreign network inside the home country does not count. */
         val roaming: Boolean get() = cellular && networkMcc != null && homeMcc != null && networkMcc != homeMcc
@@ -55,6 +57,10 @@ object Cellular {
             generation = generation,
             signalLevel = telephony?.let { tm ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) runCatching { tm.signalStrength?.level }.getOrNull() else null
+            },
+            operator = telephony?.let { tm ->
+                listOfNotNull(tm.networkOperator?.takeIf { it.isNotBlank() }, tm.networkOperatorName?.takeIf { it.isNotBlank() })
+                    .joinToString(" ").ifEmpty { null }
             },
         )
     }

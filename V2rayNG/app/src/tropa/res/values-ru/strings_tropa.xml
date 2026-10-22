@@ -372,6 +372,7 @@
     <string name="tropa_log_reach">доступность</string>
     <string name="tropa_log_address">адрес сервера</string>
     <string name="tropa_log_dns">DNS через туннель</string>
+    <string name="tropa_log_unreachable">Сервер напрямую</string>
     <string name="tropa_diag_no_network">нет сети</string>
     <string name="tropa_diag_no_internet">нет интернета</string>
     <string name="tropa_diag_whitelist">белые списки</string>
