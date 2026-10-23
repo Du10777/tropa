@@ -278,6 +278,10 @@
     <string name="tropa_settings_updates">Проверять обновления</string>
     <string name="tropa_settings_updates_status">Установлена версия %1$s</string>
     <string name="tropa_settings_updates_available">Установлена %1$s, доступна %2$s</string>
+    <string name="tropa_updates_title">Обновление</string>
+    <string name="tropa_updates_auto_hint">Раз в день Тропа сама смотрит, вышла ли новая версия, и предлагает обновиться.</string>
+    <string name="tropa_updates_check_now">Проверить обновление</string>
+    <string name="tropa_settings_updates_off">Установлена версия %1$s, автопроверка выключена</string>
     <string name="tropa_settings_updates_checking">Проверяю…</string>
     <string name="tropa_update_latest">У вас последняя версия</string>
     <string name="tropa_update_check_failed">Не удалось проверить обновления</string>
