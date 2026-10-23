@@ -155,6 +155,32 @@ object ConnectionLog {
         runCatching { locked(context) { f -> f.writeText("") } }
     }
 
+    /**
+     * Deletes [events] from the log: one line for each (a line written twice stays once when one
+     * copy was picked); what the service wrote meanwhile stays. Returns how many lines went.
+     */
+    fun delete(context: Context, events: Collection<ProbeEvent>): Int = runCatching {
+        locked(context) { f ->
+            if (!f.exists() || events.isEmpty()) return@locked 0
+            val lines = f.readLines()
+            val kept = withoutEvents(lines, events) { line -> runCatching { gson.fromJson(line, ProbeEvent::class.java) }.getOrNull() }
+            if (kept.size != lines.size) f.writeText(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
+            lines.size - kept.size
+        }
+    }.getOrDefault(0)
+
+    /** [lines] without one line for each of [events]; lines that are not events stay. */
+    internal fun withoutEvents(lines: List<String>, events: Collection<ProbeEvent>, parse: (String) -> ProbeEvent?): List<String> {
+        val left = HashMap<ProbeEvent, Int>()
+        events.forEach { left[it] = (left[it] ?: 0) + 1 }
+        return lines.filter { line ->
+            val event = line.takeIf { it.isNotBlank() }?.let(parse) ?: return@filter true
+            val count = left[event] ?: 0
+            if (count > 0) left[event] = count - 1
+            count == 0
+        }
+    }
+
     /** Readable text of the whole log, oldest first, for copying and sharing. */
     fun text(context: Context, events: List<ProbeEvent> = read(context)): String {
         val time = SimpleDateFormat("dd.MM HH:mm:ss", Locale.ROOT)

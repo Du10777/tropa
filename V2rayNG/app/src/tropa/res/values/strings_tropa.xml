@@ -386,4 +386,22 @@
     <string name="tropa_wifi_current_metered">Current Wi-Fi: Android marks it as metered. No answer yet, so the checks save traffic for now.</string>
     <string name="tropa_wifi_current_plain">Current Wi-Fi: unlimited (as Android says).</string>
     <string name="tropa_wifi_forget">Forget the answers about networks (%1$d)</string>
+    <!-- 0.16: choosing log lines -->
+    <string name="tropa_log_select_hint">Touch and hold a line to choose lines and copy, share or delete just them.</string>
+    <string name="tropa_log_choosing_hint">Tap lines to add them to the chosen ones or take them out. Back clears the choice.</string>
+    <string name="tropa_log_selected">Selected: %1$d</string>
+    <string name="tropa_log_selection_close">Clear the choice</string>
+    <string name="tropa_log_select_all">Select all</string>
+    <string name="tropa_log_copy_selected">Copy the selected lines</string>
+    <string name="tropa_log_share_selected">Share the selected lines</string>
+    <string name="tropa_log_delete_selected">Delete the selected lines</string>
+    <string name="tropa_log_delete_selected_confirm">Delete the selected lines (%1$d) from the log?</string>
+    <plurals name="tropa_log_lines_copied">
+        <item quantity="one">%d line copied</item>
+        <item quantity="other">%d lines copied</item>
+    </plurals>
+    <plurals name="tropa_log_lines_deleted">
+        <item quantity="one">%d line deleted</item>
+        <item quantity="other">%d lines deleted</item>
+    </plurals>
 </resources>

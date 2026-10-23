@@ -393,4 +393,26 @@
     <string name="tropa_wifi_current_metered">Текущая сеть Wi-Fi: Android считает её лимитной. Ответа ещё не было, поэтому пока проверки экономят трафик.</string>
     <string name="tropa_wifi_current_plain">Текущая сеть Wi-Fi: безлимитная (так считает Android).</string>
     <string name="tropa_wifi_forget">Забыть ответы о сетях (%1$d)</string>
+    <!-- 0.16: choosing log lines -->
+    <string name="tropa_log_select_hint">Нажмите и удерживайте строку, чтобы выбрать строки и скопировать, отправить или удалить только их.</string>
+    <string name="tropa_log_choosing_hint">Нажимайте на строки, чтобы добавить их к выбранным или убрать. «Назад» снимает выбор.</string>
+    <string name="tropa_log_selected">Выбрано: %1$d</string>
+    <string name="tropa_log_selection_close">Снять выбор</string>
+    <string name="tropa_log_select_all">Выбрать все</string>
+    <string name="tropa_log_copy_selected">Скопировать выбранные строки</string>
+    <string name="tropa_log_share_selected">Поделиться выбранными строками</string>
+    <string name="tropa_log_delete_selected">Удалить выбранные строки</string>
+    <string name="tropa_log_delete_selected_confirm">Удалить из журнала выбранные строки (%1$d)?</string>
+    <plurals name="tropa_log_lines_copied">
+        <item quantity="one">Скопирована %d строка</item>
+        <item quantity="few">Скопированы %d строки</item>
+        <item quantity="many">Скопировано %d строк</item>
+        <item quantity="other">Скопировано %d строки</item>
+    </plurals>
+    <plurals name="tropa_log_lines_deleted">
+        <item quantity="one">Удалена %d строка</item>
+        <item quantity="few">Удалены %d строки</item>
+        <item quantity="many">Удалено %d строк</item>
+        <item quantity="other">Удалено %d строки</item>
+    </plurals>
 </resources>

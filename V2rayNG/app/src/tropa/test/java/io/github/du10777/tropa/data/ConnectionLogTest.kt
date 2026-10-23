@@ -1,5 +1,6 @@
 package io.github.du10777.tropa.data
 
+import io.github.du10777.tropa.service.ProbeEvent
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -41,5 +42,20 @@ class ConnectionLogTest {
             )
             assertEquals(expected, actual, level.name)
         }
+    }
+
+    @Test
+    fun `deleting takes out one line per chosen event and keeps the rest`() {
+        fun event(at: Long, kind: String = "latency") = ProbeEvent(at, kind, "s", null, "", ok = true)
+        val gson = com.google.gson.Gson()
+        val a = event(1)
+        val b = event(2)
+        // b was written twice, the service appended c meanwhile, one line is not an event at all.
+        val lines = listOf(gson.toJson(a), gson.toJson(b), "not json", gson.toJson(b), gson.toJson(event(3, "selftest")))
+        val parse = { line: String -> runCatching { gson.fromJson(line, ProbeEvent::class.java) }.getOrNull() }
+        val kept = ConnectionLog.withoutEvents(lines, listOf(b, a), parse)
+        assertEquals(listOf("not json", gson.toJson(b), gson.toJson(event(3, "selftest"))), kept)
+        assertEquals(lines, ConnectionLog.withoutEvents(lines, emptyList(), parse))
+        assertEquals(listOf("not json", gson.toJson(event(3, "selftest"))), ConnectionLog.withoutEvents(lines, listOf(a, b, b), parse))
     }
 }

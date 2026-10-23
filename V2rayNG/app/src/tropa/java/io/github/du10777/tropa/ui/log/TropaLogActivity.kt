@@ -2,11 +2,15 @@ package io.github.du10777.tropa.ui.log
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.text.format.Formatter
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
@@ -43,7 +47,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -63,6 +70,7 @@ import io.github.du10777.tropa.service.ProbeEvent
 import io.github.du10777.tropa.service.WatchStateStore
 import io.github.du10777.tropa.ui.common.ChoiceDialog
 import io.github.du10777.tropa.ui.common.ConfirmDialog
+import io.github.du10777.tropa.ui.link.TropaLinkActivity
 import io.github.du10777.tropa.ui.theme.TropaColors
 import io.github.du10777.tropa.ui.theme.TropaTheme
 import kotlinx.coroutines.Dispatchers
@@ -78,6 +86,9 @@ import java.util.Locale
 /** Copying, sharing and clearing the connection log, used by the log screen and the details sheet. */
 object LogActions {
     private const val MAX_CLIP_CHARS = 400_000
+
+    /** Chosen lines up to this long are shared as text (a message); longer ones as a file. */
+    private const val SHARE_TEXT_CHARS = 50_000
     private val scope = MainScope()
 
     /** The log as text, read and formatted off the main thread (it can be megabytes). */
@@ -90,20 +101,59 @@ object LogActions {
      * an intent as plain text); the files of earlier shares are removed.
      */
     fun share(context: Context) {
+        scope.launch { shareFile(context, logText(context.applicationContext)) }
+    }
+
+    private suspend fun shareFile(context: Context, text: String) {
+        val app = context.applicationContext
+        val uri = withContext(Dispatchers.IO) {
+            val dir = File(app.cacheDir, "shared").apply { mkdirs() }
+            dir.listFiles()?.forEach { it.delete() }
+            val file = File(dir, shareFileName(System.currentTimeMillis())).apply { writeText(text) }
+            FileProvider.getUriForFile(app, "${app.packageName}.cache", file)
+        }
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.tropa_log_title))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching { context.startActivity(chooser(context, send, R.string.tropa_log_share)) }
+    }
+
+    /** Tropa itself takes shared text as a connection link: it is left out of the list. */
+    private fun chooser(context: Context, send: Intent, title: Int): Intent =
+        Intent.createChooser(send, context.getString(title))
+            .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(context, TropaLinkActivity::class.java)))
+
+    /** The chosen lines (oldest first) as text: a message when short, a file when long. */
+    fun shareLines(context: Context, events: List<ProbeEvent>) {
         scope.launch {
-            val app = context.applicationContext
-            val uri = withContext(Dispatchers.IO) {
-                val dir = File(app.cacheDir, "shared").apply { mkdirs() }
-                dir.listFiles()?.forEach { it.delete() }
-                val file = File(dir, shareFileName(System.currentTimeMillis())).apply { writeText(logText(app)) }
-                FileProvider.getUriForFile(app, "${app.packageName}.cache", file)
-            }
+            val text = withContext(Dispatchers.Default) { ConnectionLog.text(context, events) }
+            if (text.length > SHARE_TEXT_CHARS) return@launch shareFile(context, text)
             val send = Intent(Intent.ACTION_SEND)
                 .setType("text/plain")
-                .putExtra(Intent.EXTRA_STREAM, uri)
+                .putExtra(Intent.EXTRA_TEXT, text)
                 .putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.tropa_log_title))
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            runCatching { context.startActivity(Intent.createChooser(send, context.getString(R.string.tropa_log_share))) }
+            runCatching { context.startActivity(chooser(context, send, R.string.tropa_log_share_selected)) }
+        }
+    }
+
+    fun copyLines(context: Context, events: List<ProbeEvent>) {
+        scope.launch {
+            val full = withContext(Dispatchers.Default) { ConnectionLog.text(context, events) }
+            val text = if (full.length > MAX_CLIP_CHARS) "…\n" + full.takeLast(MAX_CLIP_CHARS) else full
+            context.getSystemService(ClipboardManager::class.java)
+                ?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.tropa_log_title), text))
+            context.toast(context.resources.getQuantityString(R.plurals.tropa_log_lines_copied, events.size, events.size))
+        }
+    }
+
+    /** Deletes the chosen lines; [onDone] runs on the main thread when they are gone. */
+    fun deleteLines(context: Context, events: List<ProbeEvent>, onDone: () -> Unit) {
+        scope.launch {
+            val gone = withContext(Dispatchers.IO) { ConnectionLog.delete(context.applicationContext, events) }
+            context.toast(context.resources.getQuantityString(R.plurals.tropa_log_lines_deleted, gone, gone))
+            onDone()
         }
     }
 
@@ -152,7 +202,11 @@ object LogActions {
     }
 }
 
-/** The whole connection log, newest first, with its level and size, copy, share and clear. */
+/**
+ * The whole connection log, newest first, with its level and size, copy, share and clear. A long
+ * press on a line starts choosing lines: then taps add and remove lines, and copy, share and delete
+ * work on the chosen ones only. While lines are chosen the list does not move (new entries wait).
+ */
 class TropaLogActivity : BaseComponentActivity() {
 
     @Composable
@@ -168,7 +222,14 @@ class TropaLogActivity : BaseComponentActivity() {
             var choosingLevel by remember { mutableStateOf(false) }
             var choosingSize by remember { mutableStateOf(false) }
             var sending by remember { mutableStateOf(false) }
-            LaunchedEffect(refresh) {
+            // Chosen lines: indexes into [events] (oldest first), which stay put while any is chosen.
+            var chosen by remember { mutableStateOf(emptySet<Int>()) }
+            var confirmDelete by remember { mutableStateOf(false) }
+            val choosing = chosen.isNotEmpty()
+            fun chosenEvents(): List<ProbeEvent> = chosen.sorted().mapNotNull { events.getOrNull(it) }
+            BackHandler(enabled = choosing) { chosen = emptySet() }
+            LaunchedEffect(refresh, choosing) {
+                if (choosing) return@LaunchedEffect
                 var seen: Pair<Long, Long>? = null
                 while (true) {
                     // re-read only when the service has written something new
@@ -190,25 +251,57 @@ class TropaLogActivity : BaseComponentActivity() {
                             .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(onClick = ::finish) {
-                            Icon(painterResource(R.drawable.ic_arrow_back_24dp), contentDescription = stringResource(R.string.tropa_back))
-                        }
-                        Text(
-                            stringResource(R.string.tropa_log_title),
-                            fontSize = 19.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = { LogActions.copy(context) }) {
-                            Icon(painterResource(R.drawable.tropa_ic_copy), contentDescription = stringResource(R.string.tropa_log_copy))
-                        }
-                        IconButton(onClick = { LogActions.share(context) }) {
-                            Icon(painterResource(R.drawable.ic_share_24dp), contentDescription = stringResource(R.string.tropa_log_share))
-                        }
-                        IconButton(onClick = { confirmClear = true }) {
-                            Icon(painterResource(R.drawable.ic_delete_24dp), contentDescription = stringResource(R.string.tropa_log_clear))
+                        if (choosing) {
+                            IconButton(onClick = { chosen = emptySet() }) {
+                                Icon(painterResource(R.drawable.tropa_ic_close), contentDescription = stringResource(R.string.tropa_log_selection_close))
+                            }
+                            Text(
+                                stringResource(R.string.tropa_log_selected, chosen.size),
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { chosen = events.indices.toSet() }) {
+                                Icon(painterResource(R.drawable.ic_select_all_24dp), contentDescription = stringResource(R.string.tropa_log_select_all))
+                            }
+                            IconButton(onClick = {
+                                LogActions.copyLines(context, chosenEvents())
+                                chosen = emptySet()
+                            }) {
+                                Icon(painterResource(R.drawable.tropa_ic_copy), contentDescription = stringResource(R.string.tropa_log_copy_selected))
+                            }
+                            IconButton(onClick = {
+                                LogActions.shareLines(context, chosenEvents())
+                                chosen = emptySet()
+                            }) {
+                                Icon(painterResource(R.drawable.ic_share_24dp), contentDescription = stringResource(R.string.tropa_log_share_selected))
+                            }
+                            IconButton(onClick = { confirmDelete = true }) {
+                                Icon(painterResource(R.drawable.ic_delete_24dp), contentDescription = stringResource(R.string.tropa_log_delete_selected))
+                            }
+                        } else {
+                            IconButton(onClick = ::finish) {
+                                Icon(painterResource(R.drawable.ic_arrow_back_24dp), contentDescription = stringResource(R.string.tropa_back))
+                            }
+                            Text(
+                                stringResource(R.string.tropa_log_title),
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { LogActions.copy(context) }) {
+                                Icon(painterResource(R.drawable.tropa_ic_copy), contentDescription = stringResource(R.string.tropa_log_copy))
+                            }
+                            IconButton(onClick = { LogActions.share(context) }) {
+                                Icon(painterResource(R.drawable.ic_share_24dp), contentDescription = stringResource(R.string.tropa_log_share))
+                            }
+                            IconButton(onClick = { confirmClear = true }) {
+                                Icon(painterResource(R.drawable.ic_delete_24dp), contentDescription = stringResource(R.string.tropa_log_clear))
+                            }
                         }
                     }
                     Surface(
@@ -254,11 +347,27 @@ class TropaLogActivity : BaseComponentActivity() {
                             Text(stringResource(R.string.tropa_log_empty), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                         }
                     } else {
+                        // Both hints take two lines, so the list does not jump when choosing starts.
+                        Text(
+                            stringResource(if (choosing) R.string.tropa_log_choosing_hint else R.string.tropa_log_select_hint),
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            minLines = 2,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                        )
                         LazyColumn(
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            items(events.asReversed()) { event -> LogEntry(event) }
+                            itemsIndexed(events.asReversed()) { position, event ->
+                                val index = events.lastIndex - position
+                                ChoosableLine(
+                                    chosen = index in chosen,
+                                    onTap = { if (choosing) chosen = chosen.toggled(index) },
+                                    onLongPress = { chosen = chosen.toggled(index) },
+                                ) { LogEntry(event) }
+                            }
                         }
                     }
                 }
@@ -272,6 +381,19 @@ class TropaLogActivity : BaseComponentActivity() {
                         refresh++
                     },
                     onDismiss = { confirmClear = false },
+                )
+            }
+            if (confirmDelete) {
+                ConfirmDialog(
+                    text = stringResource(R.string.tropa_log_delete_selected_confirm, chosen.size),
+                    onConfirm = {
+                        confirmDelete = false
+                        LogActions.deleteLines(context, chosenEvents()) {
+                            chosen = emptySet()
+                            refresh++
+                        }
+                    },
+                    onDismiss = { confirmDelete = false },
                 )
             }
             if (choosingLevel) {
@@ -308,6 +430,29 @@ class TropaLogActivity : BaseComponentActivity() {
             }
         }
     }
+}
+
+private fun Set<Int>.toggled(index: Int): Set<Int> = if (index in this) this - index else this + index
+
+/** A log line that can be chosen: a long press starts choosing, a chosen line is tinted. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ChoosableLine(chosen: Boolean, onTap: () -> Unit, onLongPress: () -> Unit, content: @Composable () -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (chosen) TropaColors.Brand.copy(alpha = 0.22f) else Color.Transparent)
+            .combinedClickable(
+                onClick = onTap,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                },
+            )
+            .padding(horizontal = 2.dp, vertical = 2.dp),
+    ) { content() }
 }
 
 /** A setting of the log: name on the left, value and an arrow on the right. */
