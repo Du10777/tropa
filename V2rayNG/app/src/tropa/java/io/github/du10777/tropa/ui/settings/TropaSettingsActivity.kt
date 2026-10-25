@@ -73,7 +73,6 @@ class TropaSettingsActivity : BaseComponentActivity() {
     private var logLevel by mutableStateOf(ConnectionLog.level)
     private var proxy by mutableStateOf(LocalProxy.userProxy)
     private var bypassApps by mutableStateOf(0)
-    private var updatesOn by mutableStateOf(AppUpdates.enabled)
     private var availableVersion by mutableStateOf(AppUpdates.available()?.version)
     private var roamingStop by mutableStateOf(Roaming.stopTraffic)
     private var checksSummary by mutableStateOf<Int?>(null)
@@ -83,7 +82,6 @@ class TropaSettingsActivity : BaseComponentActivity() {
         logLevel = ConnectionLog.level
         proxy = LocalProxy.userProxy
         bypassApps = if (BypassApps.reversed) 0 else BypassApps.packages().size
-        updatesOn = AppUpdates.enabled
         availableVersion = AppUpdates.available()?.version
         roamingStop = Roaming.stopTraffic
         checksSummary = when {
@@ -154,29 +152,20 @@ class TropaSettingsActivity : BaseComponentActivity() {
                             },
                             onClick = { if (killSwitch) explainKillSwitch = true },
                         )
-                        SettingsRow(
-                            R.drawable.ic_cloud_download_24dp,
-                            stringResource(R.string.tropa_updates_title),
-                            when {
-                                availableVersion != null -> stringResource(R.string.tropa_settings_updates_available, BuildConfig.VERSION_NAME, availableVersion.orEmpty())
-                                updatesOn -> stringResource(R.string.tropa_settings_updates_status, BuildConfig.VERSION_NAME)
-                                else -> stringResource(R.string.tropa_settings_updates_off, BuildConfig.VERSION_NAME)
-                            },
-                        ) {
-                            startActivity(Intent(this@TropaSettingsActivity, TropaUpdatesActivity::class.java))
-                        }
                         AdvancedModeRow(advancedMode) { enabled ->
                             advancedMode = enabled
                             TropaPrefs.advancedMode = enabled
                             if (enabled) startActivity(Intent(this@TropaSettingsActivity, MainActivity::class.java))
                         }
+                        // About: the version, its project page and the updates (a newer version known is named here).
                         SettingsRow(
                             R.drawable.ic_about_24dp,
                             stringResource(R.string.tropa_settings_about),
-                            stringResource(R.string.tropa_about_version, BuildConfig.VERSION_NAME, BuildConfig.UPSTREAM_VERSION_NAME),
-                        ) { Utils.openUri(this@TropaSettingsActivity, REPOSITORY_URL) }
+                            availableVersion?.let { stringResource(R.string.tropa_settings_updates_available, BuildConfig.VERSION_NAME, it) }
+                                ?: stringResource(R.string.tropa_about_version, BuildConfig.VERSION_NAME, BuildConfig.UPSTREAM_VERSION_NAME),
+                        ) { startActivity(Intent(this@TropaSettingsActivity, TropaAboutActivity::class.java)) }
                         SettingsRow(R.drawable.ic_source_code_24dp, stringResource(R.string.tropa_about_source), null) {
-                            Utils.openUri(this@TropaSettingsActivity, REPOSITORY_URL)
+                            Utils.openUri(this@TropaSettingsActivity, TropaAboutActivity.REPOSITORY_URL)
                         }
                     }
                 }
@@ -236,9 +225,6 @@ class TropaSettingsActivity : BaseComponentActivity() {
         }
     }
 
-    private companion object {
-        const val REPOSITORY_URL = "https://github.com/Du10777/tropa"
-    }
 }
 
 @Composable

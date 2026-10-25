@@ -126,7 +126,7 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name="io.github.du10777.tropa.ui.settings.TropaUpdatesActivity"
+            android:name="io.github.du10777.tropa.ui.settings.TropaAboutActivity"
             android:exported="false" />
         <activity
             android:name="io.github.du10777.tropa.ui.settings.TropaWifiAnswersActivity"

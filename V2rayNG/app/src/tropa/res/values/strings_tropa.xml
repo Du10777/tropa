@@ -75,6 +75,7 @@
     <string name="tropa_settings_advanced_hint">Tropa opens the full v2rayNG interface. Back returns to the simple screen.</string>
     <string name="tropa_settings_about">About</string>
     <string name="tropa_about_version">Version %1$s, based on v2rayNG %2$s</string>
+    <string name="tropa_about_more">More</string>
     <string name="tropa_about_source">Source code and license (GPL-3.0)</string>
 
     <!-- Permissions -->
@@ -275,10 +276,8 @@
     <string name="tropa_settings_updates">Check for updates</string>
     <string name="tropa_settings_updates_status">Installed: %1$s</string>
     <string name="tropa_settings_updates_available">Installed: %1$s, available: %2$s</string>
-    <string name="tropa_updates_title">Update</string>
     <string name="tropa_updates_auto_hint">Once a day Tropa looks for a new version by itself and offers to update.</string>
     <string name="tropa_updates_check_now">Check for update</string>
-    <string name="tropa_settings_updates_off">Version %1$s installed, automatic check is off</string>
     <string name="tropa_settings_updates_checking">Checking…</string>
     <string name="tropa_update_latest">You have the latest version</string>
     <string name="tropa_update_check_failed">Could not check for updates</string>
