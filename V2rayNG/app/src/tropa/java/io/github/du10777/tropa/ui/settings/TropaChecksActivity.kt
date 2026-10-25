@@ -1,5 +1,6 @@
 package io.github.du10777.tropa.ui.settings
 
+import android.content.Intent
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,6 +18,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -24,15 +27,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
@@ -60,6 +69,13 @@ import kotlin.math.roundToInt
  * changes here wins over them, and every value says where it comes from.
  */
 class TropaChecksActivity : BaseComponentActivity() {
+    /** Bumped on every return to the screen: the Wi-Fi answers may have changed on their own screen. */
+    private var resumes by mutableIntStateOf(0)
+
+    override fun onResume() {
+        super.onResume()
+        resumes++
+    }
 
     @Composable
     override fun ScreenContent() {
@@ -173,10 +189,30 @@ class TropaChecksActivity : BaseComponentActivity() {
                             CheckSettings.checkUpload = it
                             TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
                         }
-                        WifiCard(remember { MeteredWifi.current(this@TropaChecksActivity) }) {
-                            TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
-                        }
-                        MoreCard(values, server)
+                        WifiCard(
+                            wifi = remember { MeteredWifi.current(this@TropaChecksActivity) },
+                            resumes = resumes,
+                            onChange = { TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity) },
+                            onAnswers = { startActivity(Intent(this@TropaChecksActivity, TropaWifiAnswersActivity::class.java)) },
+                        )
+                        MoreCard(
+                            values = values,
+                            user = user,
+                            server = server,
+                            onSave = { input ->
+                                CheckSettings.setNumbers(input, base)
+                                user = CheckSettings.user()
+                                TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
+                                val clamped = input.any { (key, value) -> value != null && value !in CheckParams.RANGES.getValue(key) }
+                                toast(if (clamped) R.string.tropa_checks_saved_clamped else R.string.tropa_checks_saved)
+                            },
+                            onReset = {
+                                CheckSettings.resetNumbers()
+                                user = CheckSettings.user()
+                                TropaServiceEventsReceiver.wakeWatchdog(this@TropaChecksActivity)
+                                toast(R.string.tropa_checks_saved)
+                            },
+                        )
                         EnergyCard(energy, energyModel) { changed ->
                             energy = changed
                             EnergyStore.saveSettings(changed)
@@ -214,17 +250,15 @@ private fun ToggleCard(@StringRes title: Int, @StringRes hint: Int, checked: Boo
 
 /**
  * Limited Wi-Fi: what Tropa does on one, the answer about the Wi-Fi the phone is on (changeable),
- * and forgetting all answers.
+ * and the list of all answers on its own screen.
  */
 @Composable
-private fun WifiCard(wifi: MeteredWifi.Wifi?, onChange: () -> Unit) {
-    var limited by remember { mutableStateOf(wifi?.let { MeteredWifi.limited(it.key) }) }
-    var answered by remember { mutableStateOf(MeteredWifi.answered()) }
+private fun WifiCard(wifi: MeteredWifi.Wifi?, resumes: Int, onChange: () -> Unit, onAnswers: () -> Unit) {
+    var limited by remember(resumes) { mutableStateOf(wifi?.let { MeteredWifi.limited(it.key) }) }
     fun answer(value: Boolean) {
-        val key = wifi?.key ?: return
-        MeteredWifi.remember(key, value)
+        val current = wifi ?: return
+        MeteredWifi.remember(current.key, value, current.label)
         limited = value
-        answered = MeteredWifi.answered()
         onChange()
     }
     Card {
@@ -244,60 +278,98 @@ private fun WifiCard(wifi: MeteredWifi.Wifi?, onChange: () -> Unit) {
                     TextButton(onClick = { answer(true) }, enabled = limited != true) { Text(stringResource(R.string.tropa_wifi_limited)) }
                 }
             }
-            if (answered > 0) {
+            TextButton(onClick = onAnswers) { Text(stringResource(R.string.tropa_wifi_answers)) }
+        }
+    }
+}
+
+/** One number of "More parameters": its Tropa-Checks key and the label of its field. */
+private data class NumberField(val key: String, @StringRes val label: Int)
+
+/** The groups of "More parameters", each under its title. */
+private val MORE_GROUPS: List<Pair<Int, List<NumberField>>> = listOf(
+    R.string.tropa_checks_others to listOf(NumberField("othersIntervalSec", R.string.tropa_checks_param_every_sec)),
+    R.string.tropa_checks_download to listOf(
+        NumberField("downloadMinKb", R.string.tropa_checks_param_min_kb),
+        NumberField("downloadIntervalSec", R.string.tropa_checks_param_every_sec),
+    ),
+    R.string.tropa_checks_screen_off to listOf(NumberField("screenOffIntervalSec", R.string.tropa_checks_param_every_sec)),
+    R.string.tropa_checks_timeouts to listOf(
+        NumberField("latencyTimeoutSec", R.string.tropa_checks_param_latency_sec),
+        NumberField("downloadTimeoutSec", R.string.tropa_checks_param_download_sec),
+    ),
+    R.string.tropa_checks_fail to listOf(NumberField("failThreshold", R.string.tropa_checks_param_fails)),
+    R.string.tropa_checks_better to listOf(
+        NumberField("betterPercent", R.string.tropa_checks_param_percent),
+        NumberField("betterMinMs", R.string.tropa_checks_param_ms),
+        NumberField("betterRounds", R.string.tropa_checks_param_rounds),
+    ),
+)
+
+/**
+ * The rest of the parameters, each editable: what the phone runs with now, where each group comes from,
+ * and the buttons to save or to go back to the server's (or the default) values.
+ */
+@Composable
+private fun MoreCard(
+    values: CheckValues,
+    user: CheckParams,
+    server: CheckParams?,
+    onSave: (Map<String, Int?>) -> Unit,
+    onReset: () -> Unit,
+) {
+    var texts by remember(values) { mutableStateOf(CheckSettings.MORE_KEYS.associateWith { values.number(it).toString() }) }
+    val focus = LocalFocusManager.current
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.tropa_checks_more), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            MORE_GROUPS.forEach { (title, fields) ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(title), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        fields.forEach { field ->
+                            val range = CheckParams.RANGES.getValue(field.key)
+                            OutlinedTextField(
+                                value = texts.getValue(field.key),
+                                onValueChange = { typed -> texts = texts + (field.key to typed.filter { it.isDigit() }.take(6)) },
+                                label = { Text(stringResource(field.label), maxLines = 1) },
+                                supportingText = { Text(stringResource(R.string.tropa_checks_param_range, range.first, range.last)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    SourceText(
+                        when {
+                            fields.any { user.number(it.key) != null } -> CheckSource.USER
+                            fields.any { server?.number(it.key) != null } -> CheckSource.SERVER
+                            else -> CheckSource.DEFAULT
+                        },
+                    )
+                }
+            }
+            Text(stringResource(R.string.tropa_checks_more_hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = {
-                    MeteredWifi.forgetAll()
-                    limited = null
-                    answered = 0
-                    onChange()
-                }) { Text(stringResource(R.string.tropa_wifi_forget, answered)) }
+                    focus.clearFocus()
+                    onReset()
+                }) {
+                    Text(stringResource(if (server != null) R.string.tropa_checks_reset_server else R.string.tropa_checks_reset))
+                }
+                TextButton(onClick = {
+                    focus.clearFocus()
+                    onSave(texts.mapValues { (_, text) -> text.toIntOrNull() })
+                }) {
+                    Text(stringResource(R.string.tropa_checks_save))
+                }
             }
         }
     }
 }
 
-/** The parameters only the server changes: shown, so it is clear what the phone runs with. */
-@Composable
-private fun MoreCard(values: CheckValues, server: CheckParams?) {
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.tropa_checks_more), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            ParamRow(
-                R.string.tropa_checks_others,
-                stringResource(R.string.tropa_checks_every, duration(values.othersIntervalSec)),
-                server?.othersIntervalSec != null,
-            )
-            ParamRow(
-                R.string.tropa_checks_download,
-                stringResource(R.string.tropa_checks_download_value, values.downloadMinKb, duration(values.downloadIntervalSec)),
-                server?.downloadMinKb != null || server?.downloadIntervalSec != null,
-            )
-            ParamRow(
-                R.string.tropa_checks_screen_off,
-                stringResource(R.string.tropa_checks_screen_off_value, duration(values.screenOffIntervalSec)),
-                server?.screenOffIntervalSec != null,
-            )
-            ParamRow(
-                R.string.tropa_checks_timeouts,
-                stringResource(R.string.tropa_checks_timeouts_value, duration(values.latencyTimeoutSec), duration(values.downloadTimeoutSec)),
-                server?.latencyTimeoutSec != null || server?.downloadTimeoutSec != null,
-            )
-            ParamRow(
-                R.string.tropa_checks_fail,
-                pluralStringResource(R.plurals.tropa_checks_fail_value, values.failThreshold, values.failThreshold),
-                server?.failThreshold != null,
-            )
-            ParamRow(
-                R.string.tropa_checks_better,
-                pluralStringResource(R.plurals.tropa_checks_better_value, values.betterRounds, values.betterPercent, values.betterMinMs, values.betterRounds),
-                server?.betterPercent != null || server?.betterMinMs != null || server?.betterRounds != null,
-            )
-            Text(stringResource(R.string.tropa_checks_more_hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-/** How much battery the background checks may use, and what Tropa measured so far. */
+/** How much battery the background checks may use (sliders), and what Tropa measured so far. */
 @Composable
 private fun EnergyCard(settings: EnergySettings, model: EnergyModel, onChange: (EnergySettings) -> Unit) {
     Card {
@@ -305,18 +377,16 @@ private fun EnergyCard(settings: EnergySettings, model: EnergyModel, onChange: (
             Text(stringResource(R.string.tropa_energy_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(stringResource(R.string.tropa_energy_hint), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             EnergyRow(
-                stringResource(R.string.tropa_energy_screen_off, settings.screenOffPercent, settings.screenOffHours),
-                settings.screenOffPercent,
-                settings.screenOffHours,
-                onPercent = { onChange(settings.copy(screenOffPercent = it)) },
-                onHours = { onChange(settings.copy(screenOffHours = it)) },
+                title = { percent, hours -> stringResource(R.string.tropa_energy_screen_off, percent, hours) },
+                percent = settings.screenOffPercent,
+                hours = settings.screenOffHours,
+                onChange = { percent, hours -> onChange(settings.copy(screenOffPercent = percent, screenOffHours = hours)) },
             )
             EnergyRow(
-                stringResource(R.string.tropa_energy_screen_on, settings.screenOnPercent, settings.screenOnHours),
-                settings.screenOnPercent,
-                settings.screenOnHours,
-                onPercent = { onChange(settings.copy(screenOnPercent = it)) },
-                onHours = { onChange(settings.copy(screenOnHours = it)) },
+                title = { percent, hours -> stringResource(R.string.tropa_energy_screen_on, percent, hours) },
+                percent = settings.screenOnPercent,
+                hours = settings.screenOnHours,
+                onChange = { percent, hours -> onChange(settings.copy(screenOnPercent = percent, screenOnHours = hours)) },
             )
             Text(
                 model.uahPerFetch?.let { stringResource(R.string.tropa_energy_measured, formatUah(it), model.samples) }
@@ -328,12 +398,31 @@ private fun EnergyCard(settings: EnergySettings, model: EnergyModel, onChange: (
     }
 }
 
+/** One screen state: its title follows the sliders as they move; the value is saved when a slider is let go. */
 @Composable
-private fun EnergyRow(title: String, percent: Int, hours: Int, onPercent: (Int) -> Unit, onHours: (Int) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        ChipRow((EnergySettings.PERCENT_CHOICES + percent).distinct().sorted(), percent, { stringResource(R.string.tropa_energy_percent, it) }, onPercent)
-        ChipRow((EnergySettings.HOURS_CHOICES + hours).distinct().sorted(), hours, { stringResource(R.string.tropa_duration_hours, it) }, onHours)
+private fun EnergyRow(title: @Composable (Int, Int) -> String, percent: Int, hours: Int, onChange: (Int, Int) -> Unit) {
+    var p by remember(percent) { mutableFloatStateOf(percent.toFloat()) }
+    var h by remember(hours) { mutableFloatStateOf(hours.toFloat()) }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title(p.roundToInt(), h.roundToInt()), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        SliderRow(stringResource(R.string.tropa_energy_slider_percent), p, EnergySettings.PERCENT_RANGE, { p = it }) { onChange(p.roundToInt(), h.roundToInt()) }
+        SliderRow(stringResource(R.string.tropa_energy_slider_hours), h, EnergySettings.HOURS_RANGE, { h = it }) { onChange(p.roundToInt(), h.roundToInt()) }
+    }
+}
+
+@Composable
+private fun SliderRow(label: String, value: Float, range: IntRange, onValue: (Float) -> Unit, onDone: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
+        // Whole numbers, without tick marks: a 1-48 hours slider would be a row of dots.
+        Slider(
+            value = value,
+            onValueChange = { onValue(it.roundToInt().toFloat()) },
+            onValueChangeFinished = onDone,
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            colors = SliderDefaults.colors(thumbColor = TropaColors.Brand, activeTrackColor = TropaColors.Brand),
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -353,15 +442,6 @@ private fun ChipRow(choices: List<Int>, selected: Int, label: @Composable (Int) 
                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = TropaColors.Brand, selectedLabelColor = Color.White),
             )
         }
-    }
-}
-
-@Composable
-private fun ParamRow(@StringRes title: Int, value: String, fromServer: Boolean) {
-    Column {
-        Text(stringResource(title), fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        Text(value, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (fromServer) SourceText(CheckSource.SERVER)
     }
 }
 

@@ -316,7 +316,7 @@
     <string name="tropa_checks_source_user">Изменено вами</string>
     <string name="tropa_checks_reset_server">Вернуть значения сервера</string>
     <string name="tropa_checks_more">Остальные параметры</string>
-    <string name="tropa_checks_more_hint">Их задаёт сервер подключения, а без него действуют значения по умолчанию.</string>
+    <string name="tropa_checks_more_hint">Можно поменять любое значение и нажать «Сохранить». Без ваших значений их задаёт сервер подключения, а без него действуют значения по умолчанию.</string>
     <string name="tropa_checks_others">Другие серверы подключения</string>
     <string name="tropa_checks_every">раз в %1$s</string>
     <string name="tropa_checks_download">Проверка скачивания</string>
@@ -396,7 +396,6 @@
     <string name="tropa_wifi_current_unlimited">Текущая сеть Wi-Fi: безлимитная.</string>
     <string name="tropa_wifi_current_metered">Текущая сеть Wi-Fi: Android считает её лимитной. Ответа ещё не было, поэтому пока проверки экономят трафик.</string>
     <string name="tropa_wifi_current_plain">Текущая сеть Wi-Fi: безлимитная (так считает Android).</string>
-    <string name="tropa_wifi_forget">Забыть ответы о сетях (%1$d)</string>
     <!-- 0.16: choosing log lines -->
     <string name="tropa_log_select_hint">Нажмите и удерживайте строку, чтобы выбрать строки и скопировать, отправить или удалить только их.</string>
     <string name="tropa_log_choosing_hint">Нажимайте на строки, чтобы добавить их к выбранным или убрать. «Назад» снимает выбор.</string>
@@ -425,4 +424,29 @@
     <string name="tropa_route_exit">Выход</string>
     <string name="tropa_route_unknown">неизвестно</string>
     <string name="tropa_details_exit">выход: %1$s</string>
+
+    <!-- 0.19: answers about Wi-Fi networks, editable parameters, battery sliders -->
+    <string name="tropa_wifi_answers">Ответы о сетях</string>
+    <string name="tropa_wifi_answers_title">Ответы о сетях Wi-Fi</string>
+    <string name="tropa_wifi_answers_network">Сеть Wi-Fi</string>
+    <string name="tropa_wifi_answers_status">Статус</string>
+    <string name="tropa_wifi_answers_limited">лимитная</string>
+    <string name="tropa_wifi_answers_unlimited">безлимитная</string>
+    <string name="tropa_wifi_answers_forget">Забыть</string>
+    <string name="tropa_wifi_answers_when">ответ от %1$s</string>
+    <string name="tropa_wifi_answers_unnamed">Сеть Wi-Fi</string>
+    <string name="tropa_wifi_answers_empty">Ответов пока нет. Тропа спрашивает о сети Wi-Fi, когда Android считает её лимитной — например, раздачу интернета с телефона.</string>
+    <string name="tropa_wifi_answers_hint">Сеть Тропа узнаёт по её адресам (подсети): название сети Wi-Fi Android даёт только приложениям с доступом к геолокации. Если забыть ответ, Тропа снова спросит об этой сети.</string>
+    <string name="tropa_checks_param_every_sec">раз в, с</string>
+    <string name="tropa_checks_param_min_kb">от, КБ</string>
+    <string name="tropa_checks_param_latency_sec">задержка, с</string>
+    <string name="tropa_checks_param_download_sec">скачивание, с</string>
+    <string name="tropa_checks_param_fails">проверок подряд</string>
+    <string name="tropa_checks_param_percent">на, %</string>
+    <string name="tropa_checks_param_ms">и на, мс</string>
+    <string name="tropa_checks_param_rounds">раз подряд</string>
+    <string name="tropa_checks_param_range">%1$d–%2$d</string>
+    <string name="tropa_checks_saved_clamped">Сохранено. Значения вне допустимых границ приведены к ним</string>
+    <string name="tropa_energy_slider_percent">Заряд</string>
+    <string name="tropa_energy_slider_hours">Время</string>
 </resources>

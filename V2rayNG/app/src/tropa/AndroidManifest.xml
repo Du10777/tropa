@@ -128,6 +128,9 @@
         <activity
             android:name="io.github.du10777.tropa.ui.settings.TropaUpdatesActivity"
             android:exported="false" />
+        <activity
+            android:name="io.github.du10777.tropa.ui.settings.TropaWifiAnswersActivity"
+            android:exported="false" />
 
         <!-- After an update installed from Tropa: the VPN that was on comes back. -->
         <receiver

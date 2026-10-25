@@ -23,16 +23,22 @@ import java.security.MessageDigest
  * the same, and a hotspot that picks a new subnet each time looks new (then Tropa asks again).
  */
 object MeteredWifi {
-    /** The network Tropa runs over is a Wi-Fi: its key, and whether it looks metered. */
-    data class Wifi(val key: String, val metered: Boolean)
+    /** The network Tropa runs over is a Wi-Fi: its key, whether it looks metered, and its subnet as a name. */
+    data class Wifi(val key: String, val metered: Boolean, val label: String = "")
 
-    private data class Entry(val limited: Boolean, val at: Long)
+    /** An answer for the list in the settings: the network, limited or not, and when it was given. */
+    data class Answer(val key: String, val limited: Boolean, val at: Long, val label: String?)
+
+    private data class Entry(val limited: Boolean, val at: Long, val label: String? = null)
 
     private const val KEY = "tropa_wifi_answers"
+    private const val LABELS = "tropa_wifi_labels"
+    private const val LABELS_MAX = 50
     private const val KEEP_MS = 365L * 24 * 60 * 60_000
     private const val IPHONE_HOTSPOT = "172.20.10.0/28"
     private val gson = Gson()
     private val type = object : TypeToken<Map<String, Entry>>() {}.type
+    private val labelsType = object : TypeToken<Map<String, String>>() {}.type
 
     /** Test bench without Wi-Fi: pretend one (see TropaServiceEventsReceiver.ACTION_TEST_WIFI). */
     @Volatile
@@ -48,7 +54,7 @@ object MeteredWifi {
         val subnet = subnetOf(link) ?: return null
         val key = key(subnet, gatewayOf(link).orEmpty(), link.dnsServers.mapNotNull { it.hostAddress }, link.domains.orEmpty())
         val systemMetered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-        return Wifi(key, systemMetered || subnet == IPHONE_HOTSPOT)
+        return Wifi(key, systemMetered || subnet == IPHONE_HOTSPOT, subnet)
     }
 
     /** The Wi-Fi the phone is on now, for the settings screen (the VPN network itself is skipped). */
@@ -86,15 +92,46 @@ object MeteredWifi {
     /** The person's answer for the network: true = limited, false = unlimited, null = not asked yet. */
     fun limited(key: String): Boolean? = load()[key]?.limited
 
-    fun remember(key: String, limited: Boolean, now: Long = System.currentTimeMillis()) {
-        save(prune(load(), now) + (key to Entry(limited, now)))
+    /** Keeps the answer for a network; its name comes from [label] or from when Tropa asked about it. */
+    fun remember(key: String, limited: Boolean, label: String? = null, now: Long = System.currentTimeMillis()) {
+        val entries = prune(load(), now)
+        val name = label?.takeIf { it.isNotEmpty() } ?: loadLabels()[key] ?: entries[key]?.label
+        save(entries + (key to Entry(limited, now, name)))
     }
 
-    /** How many networks the person answered about. */
-    fun answered(): Int = load().size
+    /** Every answer, the newest first (Settings → Connection check → Answers about networks). */
+    fun answers(): List<Answer> =
+        load().map { (key, entry) -> Answer(key, entry.limited, entry.at, entry.label) }.sortedByDescending { it.at }
 
-    fun forgetAll() {
-        MmkvManager.encodeSettings(KEY, "")
+    /** Forgets one answer: Tropa asks about that network again. */
+    fun forget(key: String) {
+        save(load() - key)
+    }
+
+    /**
+     * Notes the name of a metered Wi-Fi the person may be asked about, so an answer given in the
+     * notification or on the main screen can be listed by it later (the last few dozen are kept).
+     */
+    fun see(wifi: Wifi) {
+        if (wifi.label.isEmpty()) return
+        val labels = loadLabels()
+        if (labels[wifi.key] == wifi.label) return
+        saveLabels((labels - wifi.key).entries.toList().takeLast(LABELS_MAX - 1).associate { it.toPair() } + (wifi.key to wifi.label))
+    }
+
+    /** How a network is shown: its subnet, an iPhone's hotspot named as such; null without a name. */
+    fun describe(label: String?): String? = when {
+        label.isNullOrEmpty() -> null
+        label == IPHONE_HOTSPOT -> "$label (iPhone)"
+        else -> label
+    }
+
+    private fun loadLabels(): Map<String, String> =
+        MmkvManager.decodeSettingsString(LABELS)?.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { gson.fromJson<Map<String, String>>(it, labelsType) }.getOrNull() }.orEmpty()
+
+    private fun saveLabels(labels: Map<String, String>) {
+        MmkvManager.encodeSettings(LABELS, gson.toJson(labels))
     }
 
     /** The checks save traffic: a limited Wi-Fi, or a metered one the person has not answered about yet. */

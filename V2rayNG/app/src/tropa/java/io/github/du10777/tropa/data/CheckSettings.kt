@@ -28,6 +28,22 @@ data class CheckValues(
 ) {
     val downloadMinBytes: Long get() = downloadMinKb * 1024L
 
+    /** A number by its Tropa-Checks key (the settings screen edits them by key). */
+    fun number(key: String): Int = when (key) {
+        "activeIntervalSec" -> activeIntervalSec
+        "othersIntervalSec" -> othersIntervalSec
+        "downloadIntervalSec" -> downloadIntervalSec
+        "screenOffIntervalSec" -> screenOffIntervalSec
+        "latencyTimeoutSec" -> latencyTimeoutSec
+        "downloadTimeoutSec" -> downloadTimeoutSec
+        "downloadMinKb" -> downloadMinKb
+        "failThreshold" -> failThreshold
+        "betterPercent" -> betterPercent
+        "betterMinMs" -> betterMinMs
+        "betterRounds" -> betterRounds
+        else -> throw IllegalArgumentException(key)
+    }
+
     /** "Noticeably better": a median latency at most this share of the active server's one. */
     val betterRatio: Double get() = 1 - betterPercent / 100.0
 }
@@ -56,6 +72,22 @@ data class CheckParams(
     val betterRounds: Int? = null,
 ) {
     val isEmpty: Boolean get() = this == CheckParams()
+
+    /** A number by its key; null when this layer does not set it. */
+    fun number(key: String): Int? = when (key) {
+        "activeIntervalSec" -> activeIntervalSec
+        "othersIntervalSec" -> othersIntervalSec
+        "downloadIntervalSec" -> downloadIntervalSec
+        "screenOffIntervalSec" -> screenOffIntervalSec
+        "latencyTimeoutSec" -> latencyTimeoutSec
+        "downloadTimeoutSec" -> downloadTimeoutSec
+        "downloadMinKb" -> downloadMinKb
+        "failThreshold" -> failThreshold
+        "betterPercent" -> betterPercent
+        "betterMinMs" -> betterMinMs
+        "betterRounds" -> betterRounds
+        else -> throw IllegalArgumentException(key)
+    }
 
     /** This layer on top of [below]: the fields set here win. */
     fun over(below: CheckValues) = CheckValues(
@@ -87,6 +119,21 @@ data class CheckParams(
 
         /** Addresses kept per list from a server. */
         const val MAX_URLS = 5
+
+        /** A layer that sets just these numbers (keys as in Tropa-Checks). */
+        fun ofNumbers(numbers: Map<String, Int?>) = CheckParams(
+            activeIntervalSec = numbers["activeIntervalSec"],
+            othersIntervalSec = numbers["othersIntervalSec"],
+            downloadIntervalSec = numbers["downloadIntervalSec"],
+            screenOffIntervalSec = numbers["screenOffIntervalSec"],
+            latencyTimeoutSec = numbers["latencyTimeoutSec"],
+            downloadTimeoutSec = numbers["downloadTimeoutSec"],
+            downloadMinKb = numbers["downloadMinKb"],
+            failThreshold = numbers["failThreshold"],
+            betterPercent = numbers["betterPercent"],
+            betterMinMs = numbers["betterMinMs"],
+            betterRounds = numbers["betterRounds"],
+        )
         private const val MAX_URL_LENGTH = 2048
 
         /**
@@ -228,6 +275,12 @@ object CheckSettings {
     /** Intervals offered for the active server check, seconds. */
     val ACTIVE_INTERVAL_CHOICES = listOf(15, 30, 60, 120)
 
+    /** The numbers of "More parameters" on the settings screen (the active interval has its own chips). */
+    val MORE_KEYS = listOf(
+        "othersIntervalSec", "downloadMinKb", "downloadIntervalSec", "screenOffIntervalSec",
+        "latencyTimeoutSec", "downloadTimeoutSec", "failThreshold", "betterPercent", "betterMinMs", "betterRounds",
+    )
+
     private const val ENABLED = "tropa_check_enabled"
     private const val ACTIVE_INTERVAL = "tropa_check_active_interval"
     private const val LATENCY_URLS = "tropa_check_latency_urls"
@@ -236,6 +289,8 @@ object CheckSettings {
     private const val USER_LAYER = "tropa_check_user_layer"
     private const val KILL_SWITCH = "tropa_kill_switch"
     private const val CHECK_UPLOAD = "tropa_check_upload"
+    private const val USER_NUMBERS = "tropa_check_user_numbers"
+    private val gson = Gson()
 
     var enabled: Boolean
         get() = MmkvManager.decodeSettingsBool(ENABLED, true)
@@ -265,12 +320,39 @@ object CheckSettings {
     /** The user's own values from the settings screen; the ones not set follow the server and the defaults. */
     fun user(): CheckParams {
         migrateUserLayer()
-        return CheckParams(
+        return readNumbers().copy(
             latencyUrls = readList(LATENCY_URLS),
             downloadUrls = readList(THROUGHPUT_URLS),
             directUrls = readList(DIRECT_URLS),
             activeIntervalSec = MmkvManager.decodeSettingsInt(ACTIVE_INTERVAL, 0).takeIf { it > 0 },
         )
+    }
+
+    /**
+     * The user's "More parameters": each moved into its range; one equal to [base] (the server's or the
+     * default) or left empty follows [base], so later server changes apply to it.
+     */
+    fun setNumbers(input: Map<String, Int?>, base: CheckValues) {
+        val kept = userNumbers(input, base)
+        MmkvManager.encodeSettings(USER_NUMBERS, if (kept.isEmpty) "" else gson.toJson(kept))
+    }
+
+    /** Forgets the user's "More parameters": the server's or the default ones apply again. */
+    fun resetNumbers() {
+        MmkvManager.encodeSettings(USER_NUMBERS, "")
+    }
+
+    internal fun userNumbers(input: Map<String, Int?>, base: CheckValues): CheckParams =
+        CheckParams.ofNumbers(
+            MORE_KEYS.associateWith { key ->
+                input[key]?.coerceIn(CheckParams.RANGES.getValue(key))?.takeIf { it != base.number(key) }
+            },
+        )
+
+    private fun readNumbers(): CheckParams {
+        val stored = MmkvManager.decodeSettingsString(USER_NUMBERS)?.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { gson.fromJson(it, CheckParams::class.java) }.getOrNull() } ?: return CheckParams()
+        return CheckParams.ofNumbers(MORE_KEYS.associateWith { key -> stored.number(key)?.coerceIn(CheckParams.RANGES.getValue(key)) })
     }
 
     fun source(user: Any?, server: Any?): CheckSource = when {

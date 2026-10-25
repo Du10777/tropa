@@ -101,4 +101,27 @@ class CheckParamsTest {
         assertTrue(s.isActiveDead("a"))
         assertEquals(NodeSelector.Decision.SwitchTo("b", NodeSelector.Reason.ACTIVE_DEAD), s.evaluate("a"))
     }
+
+    @Test
+    fun `the user's numbers are moved into their ranges and the base ones are not kept`() {
+        val base = CheckSettings.DEFAULTS
+        val kept = CheckSettings.userNumbers(
+            mapOf(
+                "othersIntervalSec" to 600,      // changed
+                "failThreshold" to 50,           // above 1..10: moved to 10
+                "betterPercent" to base.betterPercent, // the same as the base: follows the base
+                "downloadMinKb" to null,         // left empty: follows the base
+                "activeIntervalSec" to 99,       // not one of "More parameters"
+            ),
+            base,
+        )
+        assertEquals(600, kept.othersIntervalSec)
+        assertEquals(10, kept.failThreshold)
+        assertEquals(null, kept.betterPercent)
+        assertEquals(null, kept.downloadMinKb)
+        assertEquals(null, kept.activeIntervalSec)
+        val values = kept.over(base)
+        assertEquals(600, values.number("othersIntervalSec"))
+        assertEquals(base.betterRounds, values.number("betterRounds"))
+    }
 }

@@ -313,7 +313,7 @@
     <string name="tropa_checks_source_user">Changed by you</string>
     <string name="tropa_checks_reset_server">Restore the server values</string>
     <string name="tropa_checks_more">Other parameters</string>
-    <string name="tropa_checks_more_hint">They are set by the server of the connection; without it the defaults apply.</string>
+    <string name="tropa_checks_more_hint">Change any value and tap Save. Without your values the server of the connection sets them, and without it the defaults apply.</string>
     <string name="tropa_checks_others">Other servers of the connection</string>
     <string name="tropa_checks_every">every %1$s</string>
     <string name="tropa_checks_download">Download check</string>
@@ -389,7 +389,6 @@
     <string name="tropa_wifi_current_unlimited">Current Wi-Fi: unlimited.</string>
     <string name="tropa_wifi_current_metered">Current Wi-Fi: Android marks it as metered. No answer yet, so the checks save traffic for now.</string>
     <string name="tropa_wifi_current_plain">Current Wi-Fi: unlimited (as Android says).</string>
-    <string name="tropa_wifi_forget">Forget the answers about networks (%1$d)</string>
     <!-- 0.16: choosing log lines -->
     <string name="tropa_log_select_hint">Touch and hold a line to choose lines and copy, share or delete just them.</string>
     <string name="tropa_log_choosing_hint">Tap lines to add them to the chosen ones or take them out. Back clears the choice.</string>
@@ -414,4 +413,29 @@
     <string name="tropa_route_exit">Exit</string>
     <string name="tropa_route_unknown">unknown</string>
     <string name="tropa_details_exit">exit: %1$s</string>
+
+    <!-- 0.19: answers about Wi-Fi networks, editable parameters, battery sliders -->
+    <string name="tropa_wifi_answers">Answers about networks</string>
+    <string name="tropa_wifi_answers_title">Answers about Wi-Fi networks</string>
+    <string name="tropa_wifi_answers_network">Wi-Fi network</string>
+    <string name="tropa_wifi_answers_status">Status</string>
+    <string name="tropa_wifi_answers_limited">limited</string>
+    <string name="tropa_wifi_answers_unlimited">unlimited</string>
+    <string name="tropa_wifi_answers_forget">Forget</string>
+    <string name="tropa_wifi_answers_when">answered %1$s</string>
+    <string name="tropa_wifi_answers_unnamed">Wi-Fi network</string>
+    <string name="tropa_wifi_answers_empty">No answers yet. Tropa asks about a Wi-Fi network when Android marks it as metered, for example a phone sharing its mobile internet.</string>
+    <string name="tropa_wifi_answers_hint">Tropa knows a network by its addresses (the subnet): Android gives the Wi-Fi name only to apps with location access. Forget an answer and Tropa asks about that network again.</string>
+    <string name="tropa_checks_param_every_sec">every, s</string>
+    <string name="tropa_checks_param_min_kb">at least, KB</string>
+    <string name="tropa_checks_param_latency_sec">latency, s</string>
+    <string name="tropa_checks_param_download_sec">download, s</string>
+    <string name="tropa_checks_param_fails">checks in a row</string>
+    <string name="tropa_checks_param_percent">by, %</string>
+    <string name="tropa_checks_param_ms">and by, ms</string>
+    <string name="tropa_checks_param_rounds">times in a row</string>
+    <string name="tropa_checks_param_range">%1$d–%2$d</string>
+    <string name="tropa_checks_saved_clamped">Saved. Values outside their limits were moved to them</string>
+    <string name="tropa_energy_slider_percent">Battery</string>
+    <string name="tropa_energy_slider_hours">Time</string>
 </resources>

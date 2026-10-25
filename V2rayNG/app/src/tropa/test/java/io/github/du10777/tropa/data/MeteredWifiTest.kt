@@ -46,4 +46,12 @@ class MeteredWifiTest {
         assertFalse(MeteredWifi.economy(null, null))
         assertFalse(MeteredWifi.shouldAsk(null, null))
     }
+
+    @Test
+    fun `a network is shown by its subnet, an iPhone's hotspot named`() {
+        assertEquals("192.168.43.0/24", MeteredWifi.describe("192.168.43.0/24"))
+        assertEquals("172.20.10.0/28 (iPhone)", MeteredWifi.describe("172.20.10.0/28"))
+        assertEquals(null, MeteredWifi.describe(""))
+        assertEquals(null, MeteredWifi.describe(null))
+    }
 }

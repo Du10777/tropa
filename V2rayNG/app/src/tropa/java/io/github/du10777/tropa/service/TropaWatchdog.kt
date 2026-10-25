@@ -107,7 +107,7 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
         /** The person answered from the notification whether the Wi-Fi is limited (extras key, limited). */
         const val ACTION_WIFI_ANSWER = "io.github.du10777.tropa.action.WIFI_ANSWER"
 
-        /** Test bench without Wi-Fi: pretend one (extras key, metered; clear=true goes back), root only. */
+        /** Test bench without Wi-Fi: pretend one (extras key, metered, label; clear=true goes back), root only. */
         const val ACTION_TEST_WIFI = "io.github.du10777.tropa.action.TEST_WIFI"
 
         /** Lets the watchdog (VPN service process) pick up changed settings right away. */
@@ -129,7 +129,7 @@ class TropaServiceEventsReceiver : BroadcastReceiver() {
 
         private fun testWifi(intent: Intent) {
             MeteredWifi.override = if (intent.getBooleanExtra("clear", false)) null else
-                MeteredWifi.Wifi(intent.getStringExtra("key") ?: "test", intent.getBooleanExtra("metered", true))
+                MeteredWifi.Wifi(intent.getStringExtra("key") ?: "test", intent.getBooleanExtra("metered", true), intent.getStringExtra("label").orEmpty())
             TropaWatchdog.wakeUp()
         }
 
@@ -1089,6 +1089,7 @@ object TropaWatchdog {
             val cm = context.getSystemService(ConnectivityManager::class.java)
             val wifi = cm?.let { MeteredWifi.of(it, runCatching { underlyingNetwork(it) }.getOrNull()) }
             val limited = wifi?.let { MeteredWifi.limited(it.key) }
+            if (wifi != null && wifi.metered) MeteredWifi.see(wifi)
             val now = MeteredWifi.economy(wifi, limited)
             if (now != economy) {
                 economy = now
