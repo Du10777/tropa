@@ -402,6 +402,8 @@ object TropaWatchdog {
         val selftest: Boolean = false,
         /** The node's gateway named by its self-test answer. */
         val gateway: String? = null,
+        /** The exit named by its self-test answer (null also when the node names none). */
+        val exit: String? = null,
     )
 
     /** One watch session: from the core start until it stops. */
@@ -1240,7 +1242,7 @@ object TropaWatchdog {
                         recordCheck(tag, selfTestEvent(tag, result, bytes))
                         // A probe under 64 KB tells nothing about the speed: servers are then compared by the first byte.
                         val fetchMs = if (bytes >= SelfTest.ALIVE_BYTES) result.fetchMs() else null
-                        Check(ok = true, latencyMs = result.latencyMs, fetchMs = fetchMs, selftest = true, gateway = result.gatewayIp)
+                        Check(ok = true, latencyMs = result.latencyMs, fetchMs = fetchMs, selftest = true, gateway = result.gatewayIp, exit = result.exitName)
                     }
 
                     result.maybeUnsupportedFor(bytes) -> {
@@ -1259,6 +1261,8 @@ object TropaWatchdog {
             if (check.ok) {
                 selector.stats(tag)?.selftest = check.selftest
                 check.gateway?.let { selector.stats(tag)?.gateway = it }
+                // Every self-test answer tells the exit anew: one without the header means the node names none.
+                if (check.selftest) selector.stats(tag)?.exit = check.exit
             }
             return check
         }
@@ -1687,11 +1691,13 @@ object TropaWatchdog {
                     speedKbps = stats?.speedKbps ?: stats?.trafficKbps,
                     uploadKbps = stats?.uploadKbps,
                     selftest = stats?.selftest,
+                    exit = stats?.exit,
                 )
             }
             return WatchState(
                     phase = phase,
                     activeName = plan.nodes.firstOrNull { it.tag == activeTag }?.name?.takeIf { it.isNotEmpty() },
+                    activeExit = activeTag?.let { selector.stats(it)?.exit },
                     latencyMs = lastLatency,
                     checkedAt = checkedAt,
                     attempt = attempt,

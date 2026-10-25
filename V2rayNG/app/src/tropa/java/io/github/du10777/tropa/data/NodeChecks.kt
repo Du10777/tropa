@@ -59,6 +59,14 @@ object SelfTest {
 
     /** A dotted IPv4 address and nothing else. */
     fun isIpv4(value: String): Boolean = IPV4.matches(value)
+
+    /** The header naming the exit of a node (percent-encoded UTF-8). */
+    const val EXIT_HEADER = "Tropa-Exit"
+
+    /** A name a node sent percent-encoded: decoded, without control characters, at most 64 characters. */
+    fun decodeName(value: String): String? =
+        runCatching { java.net.URLDecoder.decode(value.replace("+", "%2B"), "UTF-8") }.getOrNull()
+            ?.filter { !it.isISOControl() }?.trim()?.take(64)?.takeIf { it.isNotEmpty() }
 }
 
 /** What the core's TropaSelfTest returns (JSON). */
@@ -72,6 +80,8 @@ data class SelfTestResult(
     val error: String? = null,
     /** The node's gateway from its answer (header Tropa-Gateway); use [gatewayIp]. */
     val gateway: String? = null,
+    /** Every Tropa-* header of the answer, as the node sent it (non-ASCII values percent-encoded). */
+    val tropa: Map<String, String>? = null,
 ) {
     /** Enough of the right stream came in time. The speed never decides this. */
     val alive: Boolean get() = aliveFor(SelfTest.PROBE_BYTES)
@@ -83,6 +93,9 @@ data class SelfTestResult(
 
     /** The gateway when it is a plain IPv4 address (the core checks it too; it ends up in a ping command). */
     val gatewayIp: String? get() = gateway?.trim()?.takeIf { SelfTest.isIpv4(it) }
+
+    /** The name of the exit the node sends its users' traffic to (header Tropa-Exit), for the main screen. */
+    val exitName: String? get() = tropa?.get(SelfTest.EXIT_HEADER)?.let(SelfTest::decodeName)
 
     /** Not the stream, or a failure so quick that the node may simply have no self-test. */
     val maybeUnsupported: Boolean get() = maybeUnsupportedFor(SelfTest.PROBE_BYTES)

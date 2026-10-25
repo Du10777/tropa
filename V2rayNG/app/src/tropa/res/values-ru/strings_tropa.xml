@@ -419,4 +419,10 @@
         <item quantity="many">Удалено %d строк</item>
         <item quantity="other">Удалено %d строки</item>
     </plurals>
+
+    <!-- 0.18: entry and exit on the main screen -->
+    <string name="tropa_route_entry">Вход</string>
+    <string name="tropa_route_exit">Выход</string>
+    <string name="tropa_route_unknown">неизвестно</string>
+    <string name="tropa_details_exit">выход: %1$s</string>
 </resources>

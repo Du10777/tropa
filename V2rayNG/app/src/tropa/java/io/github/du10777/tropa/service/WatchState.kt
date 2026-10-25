@@ -41,6 +41,8 @@ data class WatchNode(
     val uploadKbps: Long? = null,
     /** Checked by the self-test of its node (null before any check). */
     val selftest: Boolean? = null,
+    /** The exit its node names (Tropa-Exit of the self-test answers). */
+    val exit: String? = null,
 )
 
 /** One entry of the connection log: a check made by the watchdog or a session event. */
@@ -81,7 +83,9 @@ data class ProbeEvent(
 
 data class WatchState(
     val phase: WatchPhase,
+    /** The entry server new connections go through, and the exit its node names (null: not named). */
     val activeName: String? = null,
+    val activeExit: String? = null,
     val latencyMs: Long? = null,
     val checkedAt: Long = 0L,
     val attempt: Int = 0,

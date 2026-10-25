@@ -67,6 +67,9 @@ class NodeSelector(
 
         /** The node's gateway from its self-test answers: pinged when the server stops answering directly. */
         var gateway: String? = null
+
+        /** The exit its node names in the self-test answers (null: the node does not say). */
+        var exit: String? = null
         var trafficKbps: Long? = null
 
         /** The last check went through the self-test of the node (null before any check). */
@@ -133,6 +136,7 @@ class NodeSelector(
                 speedKbps = speedKbps,
                 uploadKbps = uploadKbps,
                 gateway = gateway,
+                exit = exit,
             )
         }
 
@@ -147,6 +151,7 @@ class NodeSelector(
             speedKbps = history.speedKbps
             uploadKbps = history.uploadKbps
             gateway = history.gateway
+            exit = history.exit
             prune()
         }
 

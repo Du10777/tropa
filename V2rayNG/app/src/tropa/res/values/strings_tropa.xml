@@ -408,4 +408,10 @@
         <item quantity="one">%d line deleted</item>
         <item quantity="other">%d lines deleted</item>
     </plurals>
+
+    <!-- 0.18: entry and exit on the main screen -->
+    <string name="tropa_route_entry">Entry</string>
+    <string name="tropa_route_exit">Exit</string>
+    <string name="tropa_route_unknown">unknown</string>
+    <string name="tropa_details_exit">exit: %1$s</string>
 </resources>

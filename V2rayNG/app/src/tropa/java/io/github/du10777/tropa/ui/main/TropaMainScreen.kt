@@ -76,6 +76,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -407,7 +408,6 @@ private fun StatusBlock(state: MainUiState, onClick: (() -> Unit)? = null) {
                 title = stringResource(R.string.tropa_status_connected)
                 hint = listOfNotNull(
                     watch.checkedAt.takeIf { it > 0 }?.let { stringResource(R.string.tropa_status_checked_ago, agoText(now - it)) },
-                    watch.activeName,
                     if (watch.economy) stringResource(R.string.tropa_status_economy) else null,
                 ).joinToString(" · ")
             }
@@ -478,6 +478,15 @@ private fun StatusBlock(state: MainUiState, onClick: (() -> Unit)? = null) {
                 Text(title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = accent)
                 if (hint.isNotEmpty()) {
                     Text(hint, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                // Connected: which entry server carries the traffic, and the exit it leaves through.
+                val entry = watch?.activeName?.takeIf {
+                    state.core == CoreState.Running && watch.phase in setOf(WatchPhase.CONNECTED, WatchPhase.CHECKS_OFF, WatchPhase.PAUSED)
+                }
+                if (entry != null) {
+                    Spacer(Modifier.height(6.dp))
+                    RouteLine(stringResource(R.string.tropa_route_entry), entry)
+                    RouteLine(stringResource(R.string.tropa_route_exit), watch.activeExit ?: stringResource(R.string.tropa_route_unknown))
                 }
             }
         }
@@ -787,6 +796,7 @@ private fun ProfileBlock(profile: ProfileDetails, watch: WatchState?) {
                     Column(Modifier.weight(1f)) {
                         Text(listOfNotNull(node.protocol.ifEmpty { null }, node.address).joinToString(" · "), fontSize = 14.sp)
                         node.transport?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        live?.exit?.let { Text(stringResource(R.string.tropa_details_exit, it), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         // The last speed check (or the user's traffic seen through the server) under its address.
                         live?.speedKbps?.takeIf { live.alive == true }?.let { kbps ->
                             val context = LocalContext.current
@@ -803,6 +813,15 @@ private fun ProfileBlock(profile: ProfileDetails, watch: WatchState?) {
                 }
             }
         }
+    }
+}
+
+/** "Entry: Kazan" under the status: the label quiet, the value as text. */
+@Composable
+private fun RouteLine(label: String, value: String) {
+    Row {
+        Text("$label: ", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

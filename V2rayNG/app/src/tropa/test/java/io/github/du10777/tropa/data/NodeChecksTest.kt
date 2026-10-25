@@ -53,6 +53,21 @@ class NodeChecksTest {
     }
 
     @Test
+    fun `the exit's name comes percent-encoded and is cleaned`() {
+        val named = SelfTestResult.parse(
+            """{"status":200,"bytes":131072,"verified":true,"tropa":{"Tropa-Exit":"%D0%92%D0%B0%D1%80%D1%88%D0%B0%D0%B2%D0%B0","Tropa-Gateway":"89.19.220.1"}}""",
+        )
+        assertEquals("Варшава", named.exitName)
+        assertEquals("Warsaw 2", SelfTestResult(tropa = mapOf("Tropa-Exit" to "Warsaw%202")).exitName)
+        assertEquals("a+b", SelfTestResult(tropa = mapOf("Tropa-Exit" to "a+b")).exitName)
+        assertEquals("ab", SelfTestResult(tropa = mapOf("Tropa-Exit" to "a%0Ab")).exitName)
+        assertEquals(64, SelfTestResult(tropa = mapOf("Tropa-Exit" to "x".repeat(100))).exitName?.length)
+        assertNull(SelfTestResult(tropa = mapOf("Tropa-Exit" to "%E0%A4%A")).exitName)
+        assertNull(SelfTestResult(tropa = mapOf("Tropa-Exit" to "%20")).exitName)
+        assertNull(SelfTestResult().exitName)
+    }
+
+    @Test
     fun `the gateway of the node is taken only as a plain IPv4 address`() {
         val named = SelfTestResult.parse("""{"status":200,"bytes":131072,"verified":true,"complete":true,"gateway":"89.19.220.1"}""")
         assertEquals("89.19.220.1", named.gatewayIp)
